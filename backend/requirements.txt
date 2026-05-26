@@ -3,3 +3,6 @@ uvicorn==0.29.0
 python-dotenv==1.0.1
 psycopg[binary]
 groq
+neo4j
+langgraph
+httpx
