@@ -36,7 +36,7 @@ def normalize_sanction(row: dict) -> dict:
         ),
         "sanction_type": row.get("sanction_type") or row.get("type") or row.get("category") or "",
         "country": row.get("country") or row.get("jurisdiction") or "",
-        "source": row.get("source") or row.get("list_source") or "OpenSanctions",
+        "source": row.get("source") or row.get("list_name") or row.get("list_source") or "OpenSanctions",
         "reason": row.get("reason") or row.get("description") or "",
     }
 
@@ -215,7 +215,7 @@ class GraphAgent:
 
 
 # ---------------------------------------------------------------------------
-# populate_graph
+# populate_graph  — called by sql_agent after queries run
 # ---------------------------------------------------------------------------
 
 def populate_graph(investigation_results: dict) -> dict:
@@ -228,37 +228,44 @@ def populate_graph(investigation_results: dict) -> dict:
         print(f"    Cleared previous graph data for: {target}")
 
         for qr in investigation_results.get("query_results", []):
-            name = qr["name"].lower()
+            name = qr.get("name", "").lower()
             rows = qr.get("rows", [])
             count = qr.get("count", 0)
 
-            # Always print every query result, even empty ones
             print(f"    [{name}] → {count} rows", end="")
             if rows:
                 print(f"  |  keys: {list(rows[0].keys())}")
             else:
-                print("  |  (no rows — check SQL query or data)")
+                print("  |  (no rows — check SQL or seed data)")
                 continue
 
             if "transaction" in name:
                 for row in rows:
                     agent.add_transaction(row, target)
-                print(f"    Added {len(rows)} transaction nodes")
+                print(f"      ↳ added {len(rows)} transaction nodes")
 
             elif "sanction" in name:
                 for row in rows:
                     agent.add_sanction(row, target)
-                print(f"    Added {len(rows)} sanction nodes")
+                print(f"      ↳ added {len(rows)} sanction nodes")
 
             elif "email" in name:
                 for row in rows:
                     agent.add_email_evidence(row, target)
-                print(f"    Added {len(rows)} email nodes")
+                print(f"      ↳ added {len(rows)} email nodes")
 
             elif "slack" in name:
                 for row in rows:
                     agent.add_slack_evidence(row, target)
-                print(f"    Added {len(rows)} slack nodes")
+                print(f"      ↳ added {len(rows)} slack nodes")
+
+            elif "correlation" in name:
+                # Correlation rows have both transaction + email fields;
+                # route each row to both handlers
+                for row in rows:
+                    agent.add_transaction(row, target)
+                    agent.add_email_evidence(row, target)
+                print(f"      ↳ added {len(rows)} correlation rows")
 
         print("    Drawing corroboration edges...")
         agent.add_corroboration_edges(target)
@@ -272,7 +279,7 @@ def populate_graph(investigation_results: dict) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# Runner
+# Runner — prints plan so you can inspect the SQL before results
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
@@ -282,10 +289,15 @@ if __name__ == "__main__":
     print("Planning...")
     plan = plan_investigation("Investigate Vendor Zenith LLC")
 
+    print("\nGenerated query plan:")
+    for q in plan["queries"]:
+        print(f"  [{q['name']}] {q['purpose']}")
+        print(f"    SQL: {q['sql']}\n")
+
     print("Executing queries...")
     results = execute_plan(plan)
 
-    print("Populating graph...")
+    print("\nPopulating graph...")
     summary = populate_graph(results)
 
     print("\nGraph Summary:")
