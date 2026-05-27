@@ -1,4 +1,4 @@
-import httpx
+import subprocess
 import json
 import psycopg
 import os
@@ -6,32 +6,41 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-QUERY_ENDPOINT = os.getenv("CORAL_QUERY_ENDPOINT", "http://localhost:8000/query")
 DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://sentinel:sentinel123@localhost:5434/sentineldb")
 
 
 def run_query(sql: str) -> dict:
-    """Execute a single SQL query via the Coral /query endpoint."""
+    """Execute a single SQL query via Coral CLI directly."""
     try:
-        with httpx.Client(timeout=30) as client:
-            response = client.post(QUERY_ENDPOINT, json={"sql": sql})
-            response.raise_for_status()
-            data = response.json()
+        result = subprocess.run(
+            ["coral", "sql", "--format", "json", sql],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
 
-            # Coral returns {"success": true, "rows": [...], "count": N}
-            # Normalise so callers always get a consistent shape
-            return {
-                "success": data.get("success", True),   # default True — if HTTP 200, assume ok
-                "rows":    data.get("rows", []),
-                "count":   data.get("count", len(data.get("rows", []))),
-                "error":   data.get("error"),
-            }
+        if result.returncode != 0:
+            return {"success": False, "rows": [], "count": 0, "error": result.stderr.strip()}
 
-    except httpx.HTTPStatusError as e:
-        print(f"    [HTTP error] {e.response.status_code}: {e.response.text}")
-        return {"success": False, "rows": [], "count": 0, "error": str(e)}
-    except httpx.RequestError as e:
-        print(f"    [Connection error] {e}")
+        rows = []
+        for line in result.stdout.strip().splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                parsed = json.loads(line)
+                if isinstance(parsed, list):
+                    rows.extend(parsed)
+                else:
+                    rows.append(parsed)
+            except json.JSONDecodeError:
+                continue
+
+        return {"success": True, "rows": rows, "count": len(rows), "error": None}
+
+    except subprocess.TimeoutExpired:
+        return {"success": False, "rows": [], "count": 0, "error": "Query timed out"}
+    except Exception as e:
         return {"success": False, "rows": [], "count": 0, "error": str(e)}
 
 
