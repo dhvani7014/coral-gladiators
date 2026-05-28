@@ -16,6 +16,13 @@ services:
     image: neo4j:5
     environment:
       NEO4J_AUTH: neo4j/sentinel123
+      NEO4J_server_bolt_enabled: "true"
+      NEO4J_server_bolt_listen__address: "0.0.0.0:7687"
+      NEO4J_server_bolt_advertised__address: "localhost:7687"
+      NEO4J_server_http_enabled: "true"
+      NEO4J_server_bolt_tls__level: "DISABLED"
+      NEO4J_browser_remote__content__hostname__whitelist: "*"
+      NEO4J_dbms_security_auth__minimum__password__length: "4"
     ports:
       - "7474:7474"
       - "7687:7687"
