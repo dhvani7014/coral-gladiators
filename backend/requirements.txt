@@ -6,3 +6,4 @@ groq
 neo4j
 langgraph
 httpx
+psycopg2-binary
