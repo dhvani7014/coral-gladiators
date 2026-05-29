@@ -349,7 +349,7 @@ export default function TracePage() {
         }
       `}</style>
 
-            <div style={{ minHeight: "100vh", background: "#020817", padding: "0 0 60px 0" }}>
+            <div style={{ background: "#020817", padding: "0 0 60px 0" }}>
 
                 {/* ── Header ── */}
                 <div style={{
