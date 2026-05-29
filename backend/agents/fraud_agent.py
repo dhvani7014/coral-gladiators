@@ -3,9 +3,9 @@ fraud_agent.py — SentinelAI Fraud Analysis Agent
 """
 
 import os
+import json
 from neo4j import GraphDatabase
 from groq import Groq
-import json
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -28,29 +28,84 @@ def _run(cypher: str, params: dict = {}) -> list[dict]:
         result = session.run(cypher, **params)
         return [dict(record) for record in result]
 
+
+# ---------------------------------------------------------------------------
+# Flag parser — handles JSON strings, plain strings, lists, nested lists
+# ---------------------------------------------------------------------------
+
+def _parse_flags(flags_val) -> list:
+    """
+    Robustly parse flags however Neo4j returns them:
+      - Already a list of strings: ["FRAUD", "TRANSFER"]
+      - List of JSON strings:      ['["FRAUD","TRANSFER"]', '["FRAUD"]']
+      - JSON string:               '["FRAUD","TRANSFER"]'
+      - Plain CSV string:          "FRAUD,TRANSFER"
+    Returns a flat deduplicated list of flag strings.
+    """
+    if not flags_val:
+        return []
+
+    result = []
+
+    def _extract(val):
+        if isinstance(val, list):
+            for item in val:
+                _extract(item)
+        elif isinstance(val, str) and val.strip():
+            # Try JSON parse first
+            try:
+                parsed = json.loads(val)
+                if isinstance(parsed, list):
+                    for item in parsed:
+                        _extract(item)
+                else:
+                    result.append(str(parsed).strip())
+            except (json.JSONDecodeError, ValueError):
+                # Plain string — may be comma-separated
+                for part in val.split(","):
+                    part = part.strip().strip('"').strip("'")
+                    if part:
+                        result.append(part)
+
+    _extract(flags_val)
+
+    # Deduplicate while preserving order
+    seen = set()
+    deduped = []
+    for f in result:
+        if f not in seen:
+            seen.add(f)
+            deduped.append(f)
+    return deduped
+
+
+# ---------------------------------------------------------------------------
+# Graph evidence extraction
+# ---------------------------------------------------------------------------
+
 def extract_graph_evidence(target: str) -> dict:
     evidence = {}
 
-    # 1. Transaction summary — checks BOTH directions (Zenith as sender OR receiver)
+    # 1. Transaction summary
     txn_rows = _run("""
         MATCH (t:Transaction)
         WHERE EXISTS { MATCH (e:Entity {name: $target})-[:INITIATED]->(t) }
            OR EXISTS { MATCH (t)-[:SENT_TO]->(e:Entity {name: $target}) }
         RETURN
-            count(t)             AS tx_count,
-            sum(t.amount)        AS total_amount,
-            avg(t.amount)        AS avg_amount,
-            max(t.amount)        AS max_amount,
-            collect(t.flags)     AS flag_lists,
+            count(t)              AS tx_count,
+            sum(t.amount)         AS total_amount,
+            avg(t.amount)         AS avg_amount,
+            max(t.amount)         AS max_amount,
+            collect(t.flags)      AS flag_lists,
             collect(t.risk_score) AS risk_scores
     """, {"target": target})
 
     if txn_rows:
         row = txn_rows[0]
-        all_flags = []
-        for fl in (row.get("flag_lists") or []):
-            if fl:
-                all_flags.extend(fl if isinstance(fl, list) else [fl])
+        # flag_lists is a list of whatever Neo4j stored per transaction
+        # _parse_flags handles all formats including nested JSON strings
+        all_flags = _parse_flags(row.get("flag_lists") or [])
+
         evidence["transactions"] = {
             "count":        row.get("tx_count", 0),
             "total_amount": float(row.get("total_amount") or 0),
@@ -80,14 +135,12 @@ def extract_graph_evidence(target: str) -> dict:
     else:
         evidence["sanctions"] = {"hit_count": 0, "types": []}
 
-    # 3. Sanctioned transactions — both directions
+    # 3. Sanctioned transactions — DISTINCT fix applied
     sanctioned_txn_rows = _run("""
         MATCH (t:Transaction)-[:INVOLVES_SANCTIONED]->(v:Entity)
         WHERE EXISTS { MATCH (:Entity {name: $target})-[:INITIATED]->(t) }
            OR EXISTS { MATCH (t)-[:SENT_TO]->(:Entity {name: $target}) }
         RETURN count(t) AS count, collect(DISTINCT v.name) AS sanctioned_entities
-
-
     """, {"target": target})
 
     if sanctioned_txn_rows:
@@ -115,12 +168,16 @@ def extract_graph_evidence(target: str) -> dict:
     else:
         evidence["emails"] = {"count": 0, "subjects": []}
 
-    # 5. Slack evidence
+    # 5. Slack evidence — searches partial name too
+    slack_target = target.split()[0]  # "Zenith LLC" → "Zenith"
+
     slack_rows = _run("""
         MATCH (e:Entity)-[:POSTED]->(s:SlackMessage)
-        WHERE e.name CONTAINS $target OR s.message CONTAINS $target
+        WHERE e.name CONTAINS $target
+        OR s.message CONTAINS $target
+        OR s.message CONTAINS $slack_target
         RETURN count(s) AS slack_count, collect(s.message) AS messages
-    """, {"target": target})
+        """, {"target": target, "slack_target": slack_target})
 
     if slack_rows:
         row = slack_rows[0]
@@ -143,7 +200,7 @@ def extract_graph_evidence(target: str) -> dict:
         corroboration_rows[0].get("corroboration_count", 0) if corroboration_rows else 0
     )
 
-    # 7. Counterparties — both directions
+    # 7. Counterparties
     counterparty_rows = _run("""
         MATCH (a:Entity)-[:INITIATED]->(t:Transaction)-[:SENT_TO]->(b:Entity)
         WHERE a.name = $target OR b.name = $target
@@ -157,23 +214,31 @@ def extract_graph_evidence(target: str) -> dict:
     return evidence
 
 
+# ---------------------------------------------------------------------------
+# Rule-based scoring
+# ---------------------------------------------------------------------------
+
 def rule_based_score(evidence: dict) -> tuple[int, list[str]]:
     score = 0
     rules = []
 
-    txn           = evidence.get("transactions", {})
-    sanctions     = evidence.get("sanctions", {})
+    txn             = evidence.get("transactions", {})
+    sanctions       = evidence.get("sanctions", {})
     sanctioned_txns = evidence.get("sanctioned_transactions", {})
 
     if sanctions.get("hit_count", 0) > 0:
         score += 35
-        rules.append(f"SANCTIONS HIT: Entity appears on {sanctions['hit_count']} sanctions list(s) "
-                     f"({', '.join(sanctions['types']) or 'unknown type'})")
+        rules.append(
+            f"SANCTIONS HIT: Entity appears on {sanctions['hit_count']} sanctions list(s) "
+            f"({', '.join(sanctions['types']) or 'unknown type'})"
+        )
 
     if sanctioned_txns.get("count", 0) > 0:
         score += 25
-        rules.append(f"SANCTIONED TRANSACTIONS: {sanctioned_txns['count']} transaction(s) "
-                     f"directly involve sanctioned entities: {', '.join(sanctioned_txns['entities'])}")
+        rules.append(
+            f"SANCTIONED TRANSACTIONS: {sanctioned_txns['count']} transaction(s) "
+            f"directly involve sanctioned entities: {', '.join(sanctioned_txns['entities'])}"
+        )
 
     tx_count = txn.get("count", 0)
     total    = txn.get("total_amount", 0)
@@ -194,8 +259,8 @@ def rule_based_score(evidence: dict) -> tuple[int, list[str]]:
         score += 10
         rules.append(f"LARGE SINGLE TRANSACTION: max amount ${max_amt:,.2f}")
 
-    flags = txn.get("flags", [])
-    unique_flags = list(set(f for f in flags if f))
+    flags        = txn.get("flags", [])
+    unique_flags = list(dict.fromkeys(f for f in flags if f))  # deduplicated, order preserved
     if unique_flags:
         score += min(len(unique_flags) * 5, 15)
         rules.append(f"RISK FLAGS PRESENT: {', '.join(unique_flags)}")
@@ -213,7 +278,9 @@ def rule_based_score(evidence: dict) -> tuple[int, list[str]]:
     corroborations = evidence.get("corroborations", 0)
     if corroborations > 0:
         score += 10
-        rules.append(f"CROSS-SOURCE CORROBORATION: {corroborations} email/slack message(s) corroborate suspicious transactions")
+        rules.append(
+            f"CROSS-SOURCE CORROBORATION: {corroborations} email/slack message(s) corroborate suspicious transactions"
+        )
 
     email_count = evidence.get("emails", {}).get("count", 0)
     slack_count = evidence.get("slack", {}).get("count", 0)
@@ -233,6 +300,10 @@ def rule_based_score(evidence: dict) -> tuple[int, list[str]]:
 
     return min(score, 100), rules
 
+
+# ---------------------------------------------------------------------------
+# LLM assessment
+# ---------------------------------------------------------------------------
 
 def _llm_assess(target: str, evidence: dict, rule_score: int, rule_findings: list[str]) -> dict:
     client = Groq(api_key=os.getenv("GROQ_API_KEY"))
@@ -293,13 +364,17 @@ Based on all evidence above, provide your fraud risk assessment JSON."""
     return json.loads(raw)
 
 
+# ---------------------------------------------------------------------------
+# Main entry point
+# ---------------------------------------------------------------------------
+
 def analyze_fraud(investigation_results: dict) -> dict:
     target = investigation_results.get("target", "Unknown")
 
     try:
-        evidence = extract_graph_evidence(target)
+        evidence                  = extract_graph_evidence(target)
         rule_score, rule_findings = rule_based_score(evidence)
-        assessment = _llm_assess(target, evidence, rule_score, rule_findings)
+        assessment                = _llm_assess(target, evidence, rule_score, rule_findings)
 
         return {
             "target":         target,
@@ -313,7 +388,7 @@ def analyze_fraud(investigation_results: dict) -> dict:
 
     except Exception as exc:
         try:
-            evidence = extract_graph_evidence(target)
+            evidence                  = extract_graph_evidence(target)
             rule_score, rule_findings = rule_based_score(evidence)
         except Exception:
             evidence, rule_score, rule_findings = {}, 0, []
@@ -337,7 +412,7 @@ def analyze_fraud(investigation_results: dict) -> dict:
                 "summary":      f"LLM assessment unavailable ({exc}). Rule-based score: {rule_score}/100.",
                 "key_findings": rule_findings,
                 "recommendation": (
-                    "ESCALATE TO COMPLIANCE"         if rule_score >= 80 else
+                    "ESCALATE TO COMPLIANCE"          if rule_score >= 80 else
                     "FURTHER INVESTIGATION REQUIRED"  if rule_score >= 60 else
                     "MONITOR"                         if rule_score >= 40 else
                     "NO ACTION REQUIRED"

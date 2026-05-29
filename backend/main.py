@@ -5,10 +5,11 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 import psycopg2
+import psycopg2.extras
 import os
 
 from dotenv import load_dotenv
-load_dotenv()  
+load_dotenv()
 
 from agents.planner import plan_investigation
 from agents.sql_agent import execute_plan
@@ -36,7 +37,9 @@ class QueryRequest(BaseModel):
     sql: str
 
 
-# ── helpers ──────────────────────────────────────────────────────────────────
+def get_db():
+    return psycopg2.connect(os.getenv("DATABASE_URL", "postgresql://sentinel:sentinel123@localhost:5433/sentineldb"))
+
 
 def sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
@@ -72,7 +75,6 @@ def investigate_sync(req: InvestigateRequest):
     report = generate_report(
         plan["target"], sql_results, fraud_assessment, graph_intelligence
     )
-
     return {
         "request": req.request,
         "target": plan["target"],
@@ -95,7 +97,6 @@ async def investigate_stream(req: InvestigateRequest):
         pipeline_errors = []
         target = req.request
 
-        # ── 1. Planner ────────────────────────────────────────────────────
         yield sse_event("agent_start", {"agent": "Planner", "message": "Generating investigation plan..."})
         await asyncio.sleep(0)
         try:
@@ -113,7 +114,6 @@ async def investigate_stream(req: InvestigateRequest):
             yield sse_event("pipeline_done", {"error": "Pipeline aborted at Planner", "pipeline_errors": pipeline_errors})
             return
 
-        # ── 2. SQL Agent ──────────────────────────────────────────────────
         yield sse_event("agent_start", {"agent": "SQL", "message": "Querying Coral federated database..."})
         await asyncio.sleep(0)
         try:
@@ -131,7 +131,6 @@ async def investigate_stream(req: InvestigateRequest):
             yield sse_event("agent_error", {"agent": "SQL", "error": str(e)})
             sql_results = {"query_results": [], "total_rows": 0}
 
-        # ── 3. Graph Population Agent ─────────────────────────────────────
         yield sse_event("agent_start", {"agent": "Graph", "message": "Populating Neo4j knowledge graph..."})
         await asyncio.sleep(0)
         try:
@@ -146,7 +145,6 @@ async def investigate_stream(req: InvestigateRequest):
             yield sse_event("agent_error", {"agent": "Graph", "error": str(e)})
             graph_results = {}
 
-        # ── 4. Fraud Agent ────────────────────────────────────────────────
         yield sse_event("agent_start", {"agent": "Fraud", "message": "Running fraud scoring rules..."})
         await asyncio.sleep(0)
         try:
@@ -164,7 +162,6 @@ async def investigate_stream(req: InvestigateRequest):
             yield sse_event("agent_error", {"agent": "Fraud", "error": str(e)})
             fraud_assessment = {}
 
-        # ── 5. Graph Intelligence Agent ───────────────────────────────────
         yield sse_event("agent_start", {"agent": "GraphIntelligence", "message": "Mapping network relationships..."})
         await asyncio.sleep(0)
         try:
@@ -180,7 +177,6 @@ async def investigate_stream(req: InvestigateRequest):
             yield sse_event("agent_error", {"agent": "GraphIntelligence", "error": str(e)})
             graph_intelligence = {}
 
-        # ── 6. Report Agent ───────────────────────────────────────────────
         yield sse_event("agent_start", {"agent": "Report", "message": "Generating investigation report..."})
         await asyncio.sleep(0)
         try:
@@ -199,7 +195,6 @@ async def investigate_stream(req: InvestigateRequest):
             yield sse_event("agent_error", {"agent": "Report", "error": str(e)})
             report = {}
 
-        # ── Final event ───────────────────────────────────────────────────
         yield sse_event("pipeline_done", {
             "request": req.request,
             "target": target,
@@ -229,25 +224,16 @@ async def investigate_stream(req: InvestigateRequest):
 @app.get("/traces")
 async def get_traces(limit: int = 50, offset: int = 0):
     try:
-        conn = psycopg2.connect(os.getenv("DATABASE_URL", "postgresql://sentinel:sentinel123@localhost:5434/sentineldb"))
+        conn = get_db()
         cur = conn.cursor()
-
         cur.execute("SELECT COUNT(*) FROM coral_traces")
         total = cur.fetchone()[0]
-
         cur.execute("""
-            SELECT
-                id,
-                query_text,
-                sources_hit,
-                execution_ms,
-                cache_hit,
-                timestamp
+            SELECT id, query_text, sources_hit, execution_ms, cache_hit, timestamp
             FROM coral_traces
             ORDER BY timestamp DESC
             LIMIT %s OFFSET %s
         """, (limit, offset))
-
         rows = cur.fetchall()
         cur.close()
         conn.close()
@@ -263,9 +249,7 @@ async def get_traces(limit: int = 50, offset: int = 0):
                 "cache_hit": cache_hit,
                 "created_at": timestamp.isoformat() if timestamp else None,
             })
-
         return {"traces": traces, "total": total, "limit": limit, "offset": offset}
-
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to fetch traces: {str(e)}")
 
@@ -273,7 +257,7 @@ async def get_traces(limit: int = 50, offset: int = 0):
 @app.delete("/traces")
 async def clear_traces():
     try:
-        conn = psycopg2.connect(os.getenv("DATABASE_URL", "postgresql://sentinel:sentinel123@localhost:5434/sentineldb"))
+        conn = get_db()
         cur = conn.cursor()
         cur.execute("DELETE FROM coral_traces")
         conn.commit()
@@ -283,3 +267,132 @@ async def clear_traces():
         return {"deleted": deleted}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/transactions/flagged")
+def get_flagged_transactions():
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    cur.execute("""
+        SELECT transaction_id, sender, receiver, amount, timestamp,
+               location, risk_score, flags
+        FROM transactions
+        WHERE risk_score >= 40
+        ORDER BY risk_score DESC, timestamp DESC
+        LIMIT 50
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    conn.close()
+
+    transactions = []
+    for row in rows:
+        r = dict(row)
+        flags = r.get("flags", [])
+        if isinstance(flags, str):
+            try:
+                flags = json.loads(flags)
+            except Exception:
+                flags = [flags] if flags else []
+        r["flags"]      = flags
+        r["amount"]     = float(r["amount"] or 0)
+        r["risk_score"] = int(r["risk_score"] or 0)
+        r["timestamp"]  = str(r["timestamp"] or "")
+        transactions.append(r)
+
+    return {"transactions": transactions, "total": len(transactions)}
+
+
+@app.get("/stats")
+def get_stats():
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+
+    # Transaction stats
+    cur.execute("""
+        SELECT
+            COUNT(*)                                                 AS total,
+            COUNT(*) FILTER (WHERE risk_score >= 40)                AS flagged,
+            COUNT(*) FILTER (WHERE risk_score >= 70)                AS critical,
+            COUNT(*) FILTER (WHERE risk_score >= 40
+                               AND risk_score < 70)                 AS high,
+            COALESCE(SUM(amount) FILTER (WHERE risk_score >= 40), 0) AS total_exposure
+        FROM transactions
+    """)
+    tx = dict(cur.fetchone())
+
+    # Top vendors by risk
+    cur.execute("""
+        SELECT
+            receiver            AS name,
+            COUNT(*)            AS tx_count,
+            MAX(risk_score)     AS max_risk,
+            SUM(amount)         AS total_amount
+        FROM transactions
+        WHERE risk_score >= 40
+        GROUP BY receiver
+        ORDER BY max_risk DESC, tx_count DESC
+        LIMIT 5
+    """)
+    top_vendors = [dict(r) for r in cur.fetchall()]
+
+    # Recent flagged transactions
+    cur.execute("""
+        SELECT transaction_id, sender, receiver, amount, risk_score, flags, timestamp
+        FROM transactions
+        WHERE risk_score >= 40
+        ORDER BY timestamp DESC
+        LIMIT 6
+    """)
+    recent = []
+    for row in cur.fetchall():
+        r = dict(row)
+        flags = r.get("flags", [])
+        if isinstance(flags, str):
+            try:
+                flags = json.loads(flags)
+            except Exception:
+                flags = [flags] if flags else []
+        r["flags"]      = flags
+        r["amount"]     = float(r["amount"] or 0)
+        r["risk_score"] = int(r["risk_score"] or 0)
+        r["timestamp"]  = str(r["timestamp"] or "")
+        recent.append(r)
+
+    # Trace stats
+    cur.execute("""
+        SELECT
+            COUNT(*)                                          AS total_queries,
+            COALESCE(AVG(execution_ms), 0)                   AS avg_latency_ms,
+            COUNT(*) FILTER (WHERE cache_hit = true)         AS cache_hits
+        FROM coral_traces
+    """)
+    traces = dict(cur.fetchone())
+
+    cur.close()
+    conn.close()
+
+    return {
+        "transactions": {
+            "total":          int(tx["total"]),
+            "flagged":        int(tx["flagged"]),
+            "critical":       int(tx["critical"]),
+            "high":           int(tx["high"]),
+            "total_exposure": float(tx["total_exposure"]),
+        },
+        "traces": {
+            "total_queries":  int(traces["total_queries"]),
+            "avg_latency_ms": round(float(traces["avg_latency_ms"]), 1),
+            "cache_hits":     int(traces["cache_hits"]),
+        },
+        "top_vendors": [
+            {
+                "name":         r["name"],
+                "tx_count":     int(r["tx_count"]),
+                "max_risk":     int(r["max_risk"]),
+                "total_amount": float(r["total_amount"]),
+            }
+            for r in top_vendors
+        ],
+        "recent_flagged": recent,
+    }
