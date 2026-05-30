@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 
 interface Transaction {
     transaction_id: string;
@@ -14,13 +15,35 @@ interface Transaction {
 }
 
 function riskBand(score: number) {
-    if (score >= 70) return { row: "bg-red-500/5 border-l-2 border-red-500/60", badge: "bg-red-500/15 border-red-500/40 text-red-400", dot: "bg-red-500 shadow-[0_0_6px_#ef4444]" };
-    if (score >= 40) return { row: "bg-amber-400/5 border-l-2 border-amber-400/40", badge: "bg-amber-400/15 border-amber-400/40 text-amber-400", dot: "bg-amber-400 shadow-[0_0_6px_#f59e0b]" };
-    return { row: "bg-transparent border-l-2 border-transparent", badge: "bg-slate-700/50 border-slate-600 text-slate-400", dot: "bg-slate-500" };
+    if (score >= 70) return {
+        row: "border-l-2 border-[#D97B4F] bg-[#D97B4F]/[0.03]",
+        badge: "bg-[#F5EAE0] text-[#C06030] border border-[#E8CDB8]",
+        bar: "bg-[#D97B4F]",
+        text: "text-[#C06030]",
+        dot: "bg-[#D97B4F]",
+    };
+    if (score >= 40) return {
+        row: "border-l-2 border-[#A87820] bg-[#A87820]/[0.03]",
+        badge: "bg-[#F5EDD8] text-[#A87820] border border-[#E8D5A0]",
+        bar: "bg-[#A87820]",
+        text: "text-[#A87820]",
+        dot: "bg-[#C4B8AC]",
+    };
+    return {
+        row: "border-l-2 border-transparent",
+        badge: "bg-[#EDE7DF] text-[#9B8E82] border border-[#D8CEBF]",
+        bar: "bg-[#C4B8AC]",
+        text: "text-[#9B8E82]",
+        dot: "bg-[#D8CEBF]",
+    };
 }
 
 function fmt(amount: number) {
-    return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(amount);
+    return new Intl.NumberFormat("en-US", {
+        style: "currency",
+        currency: "USD",
+        maximumFractionDigits: 0,
+    }).format(amount);
 }
 
 function timeAgo(ts: string) {
@@ -48,17 +71,13 @@ export default function FeedPage() {
             const res = await fetch("http://localhost:8000/transactions/flagged");
             const data = await res.json();
             const txns: Transaction[] = data.transactions || [];
-
-            // Detect new rows for flash animation
-            const incoming = new Set(txns.map(t => t.transaction_id));
-            const fresh = txns.filter(t => !knownIds.current.has(t.transaction_id));
+            const fresh = txns.filter((t) => !knownIds.current.has(t.transaction_id));
             if (fresh.length > 0) {
-                const freshIds = new Set(fresh.map(t => t.transaction_id));
+                const freshIds = new Set(fresh.map((t) => t.transaction_id));
                 setNewIds(freshIds);
                 setTimeout(() => setNewIds(new Set()), 1500);
             }
-            knownIds.current = incoming;
-
+            knownIds.current = new Set(txns.map((t) => t.transaction_id));
             setTransactions(txns);
             setLastUpdated(new Date().toLocaleTimeString());
         } catch (e) {
@@ -68,9 +87,7 @@ export default function FeedPage() {
         }
     }
 
-    useEffect(() => {
-        fetchFeed();
-    }, []);
+    useEffect(() => { fetchFeed(); }, []);
 
     useEffect(() => {
         if (autoRefresh) {
@@ -81,189 +98,230 @@ export default function FeedPage() {
         return () => { if (intervalRef.current) clearInterval(intervalRef.current); };
     }, [autoRefresh]);
 
-    const filtered = transactions.filter(t => {
+    const filtered = transactions.filter((t) => {
         if (filter === "CRITICAL") return t.risk_score >= 70;
         if (filter === "HIGH") return t.risk_score >= 40 && t.risk_score < 70;
         return true;
     });
 
-    const criticalCount = transactions.filter(t => t.risk_score >= 70).length;
-    const highCount = transactions.filter(t => t.risk_score >= 40 && t.risk_score < 70).length;
+    const criticalCount = transactions.filter((t) => t.risk_score >= 70).length;
+    const highCount = transactions.filter((t) => t.risk_score >= 40 && t.risk_score < 70).length;
     const totalValue = transactions.reduce((s, t) => s + t.amount, 0);
 
     return (
-        <div className="min-h-screen bg-[#020817] text-slate-200 font-mono">
+        <>
+            <style>{`
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Outfit:wght@300;400;500;600&display=swap');
+        .font-playfair { font-family: 'Playfair Display', serif; }
+        .font-outfit  { font-family: 'Outfit', sans-serif; }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+        @keyframes flash-new { 0% { background-color: #D97B4F18; } 100% { background-color: transparent; } }
+        .flash-new { animation: flash-new 1.5s ease-out forwards; }
+      `}</style>
 
-            {/* header */}
-            <div className="border-b border-slate-800 bg-slate-950 px-10 py-5 flex items-center justify-between">
-                <div className="flex items-center gap-3">
-                    <div className={`w-2 h-2 rounded-full ${autoRefresh ? "bg-red-500 shadow-[0_0_8px_#ef4444] animate-pulse" : "bg-slate-600"}`} />
-                    <span className="text-xs tracking-[4px] text-slate-400">SENTINEL</span>
-                    <span className="text-slate-700">|</span>
-                    <span className="text-xs tracking-[3px] text-slate-500">LIVE FRAUD FEED</span>
-                </div>
-                <div className="flex items-center gap-6">
-                    {lastUpdated && (
-                        <span className="text-[10px] tracking-wider text-slate-600">
-                            UPDATED {lastUpdated}
-                        </span>
-                    )}
-                    <button
-                        onClick={() => setAutoRefresh(r => !r)}
-                        className={`px-4 py-1.5 rounded text-[10px] font-bold tracking-widest border transition-all ${autoRefresh
-                                ? "bg-red-500/10 border-red-500/30 text-red-400 hover:bg-red-500/20"
-                                : "bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300"
-                            }`}
-                    >
-                        {autoRefresh ? "⏸ PAUSE" : "▶ RESUME"}
-                    </button>
-                    <button
-                        onClick={fetchFeed}
-                        className="px-4 py-1.5 rounded text-[10px] font-bold tracking-widest border border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-500 transition-all"
-                    >
-                        ↻ REFRESH
-                    </button>
-                </div>
-            </div>
+            <div className="font-outfit bg-[#F7F3EE] min-h-screen text-[#1A1612]">
 
-            <div className="max-w-7xl mx-auto px-10 py-8">
-
-                {/* stat bar */}
-                <div className="grid grid-cols-4 gap-4 mb-8">
-                    {[
-                        { label: "TOTAL FLAGGED", value: transactions.length, color: "text-slate-300" },
-                        { label: "CRITICAL (≥70)", value: criticalCount, color: "text-red-400" },
-                        { label: "HIGH (40–69)", value: highCount, color: "text-amber-400" },
-                        { label: "TOTAL EXPOSURE", value: `$${(totalValue / 1000).toFixed(0)}k`, color: "text-violet-400" },
-                    ].map(s => (
-                        <div key={s.label} className="bg-slate-900 border border-slate-800 rounded-lg px-5 py-4">
-                            <div className="text-[9px] tracking-[3px] text-slate-600 mb-1">{s.label}</div>
-                            <div className={`text-2xl font-bold ${s.color}`}>{s.value}</div>
-                        </div>
-                    ))}
-                </div>
-
-                {/* filter tabs */}
-                <div className="flex gap-2 mb-5">
-                    {(["ALL", "CRITICAL", "HIGH"] as const).map(f => (
+                {/* Top bar */}
+                <div className="bg-[#1A1612] flex items-center justify-between px-12 h-[52px]">
+                    <div className="flex items-center gap-6">
+                        <Link href="/" className="font-outfit font-semibold text-sm tracking-widest text-[#F7F3EE] uppercase no-underline">
+                            Sentinel
+                        </Link>
+                        <div className="w-px h-4 bg-[#3A3430]" />
+                        <span className="text-[11px] text-[#6B5E52] tracking-wide">Live Fraud Feed</span>
+                    </div>
+                    <div className="flex items-center gap-4">
+                        {lastUpdated && (
+                            <span className="text-[10px] text-[#3A3430] tracking-widest uppercase">
+                                Updated {lastUpdated}
+                            </span>
+                        )}
                         <button
-                            key={f}
-                            onClick={() => setFilter(f)}
-                            className={`px-4 py-1.5 rounded text-[10px] font-bold tracking-widest border transition-all ${filter === f
-                                    ? f === "CRITICAL"
-                                        ? "bg-red-500/15 border-red-500/40 text-red-400"
-                                        : f === "HIGH"
-                                            ? "bg-amber-400/15 border-amber-400/40 text-amber-400"
-                                            : "bg-slate-700 border-slate-600 text-slate-200"
-                                    : "bg-transparent border-slate-800 text-slate-600 hover:text-slate-400"
+                            onClick={fetchFeed}
+                            className="text-[11px] text-[#6B5E52] hover:text-[#F7F3EE] tracking-wide transition-colors bg-transparent border-none cursor-pointer"
+                        >
+                            ↻ Refresh
+                        </button>
+                        <button
+                            onClick={() => setAutoRefresh((r) => !r)}
+                            className={`flex items-center gap-2 border rounded-full px-3 py-[5px] text-[11px] font-medium tracking-wide transition-colors cursor-pointer bg-transparent ${autoRefresh
+                                ? "border-[#D97B4F]/40 text-[#D97B4F]"
+                                : "border-[#3A3430] text-[#3A3430] hover:text-[#6B5E52]"
                                 }`}
                         >
-                            {f} {f === "ALL" ? `(${transactions.length})` : f === "CRITICAL" ? `(${criticalCount})` : `(${highCount})`}
+                            {autoRefresh && <div className="w-1.5 h-1.5 rounded-full bg-[#D97B4F] animate-pulse-dot" />}
+                            {autoRefresh ? "Live" : "Paused"}
                         </button>
-                    ))}
+                    </div>
                 </div>
 
-                {/* table */}
-                <div className="bg-slate-950 border border-slate-800 rounded-xl overflow-hidden">
-
-                    {/* table header */}
-                    <div className="grid grid-cols-[2fr_2fr_2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-3 border-b border-slate-800 bg-slate-900/50">
-                        {["VENDOR / RECEIVER", "SENDER", "AMOUNT", "RISK", "LOCATION", "TIME", "FLAGS"].map(h => (
-                            <span key={h} className="text-[9px] tracking-[3px] text-slate-600">{h}</span>
-                        ))}
+                {/* Page header */}
+                <div className="px-12 pt-12 pb-10 border-b border-[#E0D8CF]">
+                    <div className="flex items-center gap-2.5 mb-4">
+                        <div className="w-6 bg-[#D97B4F]" style={{ height: "1.5px" }} />
+                        <span className="text-[11px] font-medium tracking-[0.18em] text-[#D97B4F] uppercase">
+                            Real-time monitoring
+                        </span>
                     </div>
-
-                    {loading && (
-                        <div className="text-center py-16 text-slate-700 text-xs tracking-widest">
-                            LOADING FEED...
+                    <div className="flex items-end justify-between gap-8">
+                        <h1 className="font-playfair text-[52px] font-black leading-[0.92] tracking-tight text-[#1A1612]">
+                            Live <em className="italic text-[#8B5E3C]">Feed.</em>
+                        </h1>
+                        {/* Stat pills */}
+                        <div className="flex items-center gap-3 pb-1">
+                            <div className="flex items-baseline gap-2 bg-[#EDE7DF] border border-[#D8CEBF] rounded-md px-4 py-2.5">
+                                <span className="font-playfair text-[20px] font-bold text-[#1A1612]">{transactions.length}</span>
+                                <span className="text-[11px] text-[#9B8E82] tracking-wide">Flagged</span>
+                            </div>
+                            <div className="flex items-baseline gap-2 bg-[#F5EAE0] border border-[#E8CDB8] rounded-md px-4 py-2.5">
+                                <span className="font-playfair text-[20px] font-bold text-[#C06030]">{criticalCount}</span>
+                                <span className="text-[11px] text-[#C06030]/70 tracking-wide">Critical</span>
+                            </div>
+                            <div className="flex items-baseline gap-2 bg-[#F5EDD8] border border-[#E8D5A0] rounded-md px-4 py-2.5">
+                                <span className="font-playfair text-[20px] font-bold text-[#A87820]">{highCount}</span>
+                                <span className="text-[11px] text-[#A87820]/70 tracking-wide">High</span>
+                            </div>
+                            <div className="flex items-baseline gap-2 bg-[#EDE7DF] border border-[#D8CEBF] rounded-md px-4 py-2.5">
+                                <span className="font-playfair text-[20px] font-bold text-[#1A1612]">
+                                    ${(totalValue / 1000).toFixed(0)}k
+                                </span>
+                                <span className="text-[11px] text-[#9B8E82] tracking-wide">Exposure</span>
+                            </div>
                         </div>
-                    )}
+                    </div>
+                </div>
 
-                    {!loading && filtered.length === 0 && (
-                        <div className="text-center py-16 text-slate-700 text-xs tracking-widest">
-                            NO TRANSACTIONS MATCH CURRENT FILTER
-                        </div>
-                    )}
+                <div className="px-12 py-8">
 
-                    <div className="divide-y divide-slate-900/60">
-                        {filtered.map(tx => {
-                            const rb = riskBand(tx.risk_score);
-                            const isNew = newIds.has(tx.transaction_id);
-                            const isCrit = tx.risk_score >= 70;
-
-                            return (
-                                <div
-                                    key={tx.transaction_id}
-                                    className={`grid grid-cols-[2fr_2fr_2fr_1fr_1fr_1fr_auto] gap-4 px-5 py-3.5 items-center transition-all duration-700 ${rb.row} ${isNew ? "bg-blue-500/10" : ""}`}
+                    {/* Filter tabs */}
+                    <div className="flex items-center justify-between mb-6">
+                        <div className="flex gap-px border border-[#E0D8CF] rounded-md overflow-hidden">
+                            {(["ALL", "CRITICAL", "HIGH"] as const).map((f) => (
+                                <button
+                                    key={f}
+                                    onClick={() => setFilter(f)}
+                                    className={`px-5 py-2 text-[11px] font-medium tracking-widest uppercase border-none cursor-pointer transition-colors ${filter === f
+                                        ? "bg-[#1A1612] text-[#F7F3EE]"
+                                        : "bg-[#F7F3EE] text-[#9B8E82] hover:bg-[#EDE7DF]"
+                                        }`}
                                 >
-                                    {/* receiver */}
-                                    <div className="flex items-center gap-2 min-w-0">
-                                        <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${rb.dot}`} />
-                                        <span className={`text-xs font-bold truncate ${isCrit ? "text-red-300" : "text-slate-300"}`}>
-                                            {tx.receiver}
-                                        </span>
-                                    </div>
-
-                                    {/* sender */}
-                                    <span className="text-xs text-slate-500 truncate">{tx.sender}</span>
-
-                                    {/* amount */}
-                                    <span className={`text-xs font-bold ${isCrit ? "text-red-400" : "text-amber-400"}`}>
-                                        {fmt(tx.amount)}
+                                    {f}{" "}
+                                    <span className="ml-1 opacity-60">
+                                        ({f === "ALL" ? transactions.length : f === "CRITICAL" ? criticalCount : highCount})
                                     </span>
-
-                                    {/* risk score */}
-                                    <div className="flex items-center gap-2">
-                                        <div className="w-12 h-1.5 bg-slate-800 rounded-full overflow-hidden">
-                                            <div
-                                                className={`h-full rounded-full ${isCrit ? "bg-red-500" : "bg-amber-400"}`}
-                                                style={{ width: `${tx.risk_score}%` }}
-                                            />
-                                        </div>
-                                        <span className={`text-xs font-bold ${isCrit ? "text-red-400" : "text-amber-400"}`}>
-                                            {tx.risk_score}
-                                        </span>
-                                    </div>
-
-                                    {/* location */}
-                                    <span className="text-xs text-slate-600 truncate">{tx.location || "—"}</span>
-
-                                    {/* time */}
-                                    <span className="text-xs text-slate-600">{timeAgo(tx.timestamp)}</span>
-
-                                    {/* flags */}
-                                    <div className="flex gap-1 flex-wrap justify-end">
-                                        {(tx.flags || []).slice(0, 2).map(flag => (
-                                            <span key={flag} className={`px-1.5 py-0.5 rounded text-[8px] font-bold tracking-wide border ${rb.badge}`}>
-                                                {flag}
-                                            </span>
-                                        ))}
-                                        {(tx.flags || []).length > 2 && (
-                                            <span className="px-1.5 py-0.5 rounded text-[8px] text-slate-600 border border-slate-800">
-                                                +{tx.flags.length - 2}
-                                            </span>
-                                        )}
-                                    </div>
-                                </div>
-                            );
-                        })}
+                                </button>
+                            ))}
+                        </div>
+                        <span className="text-[11px] text-[#C4B8AC] tracking-wide">
+                            Showing {filtered.length} transaction{filtered.length !== 1 ? "s" : ""}
+                        </span>
                     </div>
-                </div>
 
-                {/* footer */}
-                <div className="border-t border-slate-800 mt-8 pt-5 flex justify-between items-center">
-                    <span className="text-[10px] tracking-widest text-slate-700">
-                        SENTINEL AI — LIVE FRAUD MONITORING
-                    </span>
-                    <div className="flex gap-5">
-                        {[["→ REPORT", "/report"], ["→ GRAPH", "/graph"], ["→ TRACES", "/trace"]].map(([label, href]) => (
-                            <a key={href} href={href} className="text-[10px] tracking-widest text-slate-600 hover:text-slate-400 transition-colors no-underline">
-                                {label}
-                            </a>
-                        ))}
+                    {/* Table */}
+                    <div className="border border-[#E0D8CF] rounded-lg overflow-hidden">
+
+                        {/* Table header */}
+                        <div className="grid grid-cols-[2fr_2fr_1.2fr_1fr_1.2fr_1fr_1.5fr] gap-4 px-6 py-3 bg-[#EDE7DF] border-b border-[#E0D8CF]">
+                            {["Receiver", "Sender", "Amount", "Risk", "Location", "Time", "Flags"].map((h) => (
+                                <span key={h} className="text-[10px] font-medium tracking-[0.15em] text-[#9B8E82] uppercase">{h}</span>
+                            ))}
+                        </div>
+
+                        {loading && (
+                            <div className="text-center py-16 text-[#C4B8AC] text-sm tracking-widest">
+                                Loading feed...
+                            </div>
+                        )}
+
+                        {!loading && filtered.length === 0 && (
+                            <div className="text-center py-16 text-[#C4B8AC] text-sm">
+                                No transactions match current filter.
+                            </div>
+                        )}
+
+                        <div className="divide-y divide-[#E0D8CF]">
+                            {filtered.map((tx) => {
+                                const rb = riskBand(tx.risk_score);
+                                const isNew = newIds.has(tx.transaction_id);
+                                return (
+                                    <div
+                                        key={tx.transaction_id}
+                                        className={`grid grid-cols-[2fr_2fr_1.2fr_1fr_1.2fr_1fr_1.5fr] gap-4 px-6 py-4 items-center transition-all duration-700 bg-[#F7F3EE] hover:bg-[#F0E9E0] ${rb.row} ${isNew ? "flash-new" : ""}`}
+                                    >
+                                        {/* Receiver */}
+                                        <div className="flex items-center gap-2.5 min-w-0">
+                                            <div className={`w-1.5 h-1.5 rounded-full flex-shrink-0 ${rb.dot}`} />
+                                            <span className={`text-[13px] font-medium truncate ${rb.text}`}>
+                                                {tx.receiver}
+                                            </span>
+                                        </div>
+
+                                        {/* Sender */}
+                                        <span className="text-[13px] font-light text-[#9B8E82] truncate">{tx.sender}</span>
+
+                                        {/* Amount */}
+                                        <span className={`text-[13px] font-semibold ${rb.text}`}>{fmt(tx.amount)}</span>
+
+                                        {/* Risk score */}
+                                        <div className="flex items-center gap-2">
+                                            <div className="w-10 h-1 bg-[#E0D8CF] rounded-full overflow-hidden">
+                                                <div
+                                                    className={`h-full rounded-full ${rb.bar}`}
+                                                    style={{ width: `${tx.risk_score}%` }}
+                                                />
+                                            </div>
+                                            <span className={`text-[12px] font-medium ${rb.text}`}>{tx.risk_score}</span>
+                                        </div>
+
+                                        {/* Location */}
+                                        <span className="text-[12px] font-light text-[#C4B8AC] truncate">{tx.location || "—"}</span>
+
+                                        {/* Time */}
+                                        <span className="text-[12px] font-light text-[#C4B8AC]">{timeAgo(tx.timestamp)}</span>
+
+                                        {/* Flags */}
+                                        <div className="flex gap-1 flex-wrap">
+                                            {(tx.flags || []).slice(0, 2).map((flag) => (
+                                                <span
+                                                    key={flag}
+                                                    className={`px-2 py-0.5 rounded-full text-[10px] font-medium tracking-wide ${rb.badge}`}
+                                                >
+                                                    {flag}
+                                                </span>
+                                            ))}
+                                            {(tx.flags || []).length > 2 && (
+                                                <span className="px-2 py-0.5 rounded-full text-[10px] text-[#C4B8AC] border border-[#E0D8CF]">
+                                                    +{tx.flags.length - 2}
+                                                </span>
+                                            )}
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
+                    </div>
+
+                    {/* ── Footer ── */}
+                    <div className="bg-white/50 backdrop-blur-sm px-12 py-5 fixed bottom-0 left-0 right-0 border-t border-[#E0D8CF]">
+                        <div className="flex justify-center w-full gap-8 flex-wrap">
+                            {[
+                                { key: "SentinelDB", val: "port 5433" },
+                                { key: "Neo4j", val: "port 7687" },
+                                { key: "API", val: "port 8000" },
+                                { key: "Model", val: "GROQ - llama-3.3-70b-versatile" },
+                                { key: "Developed by", val: "Partha Chakraborty, Dhvani Dave" },
+                            ].map(({ key, val }) => (
+                                <div key={key} className="flex items-center gap-2">
+                                    <span className="text-[10px] tracking-widest text-[#3A3430] uppercase">{key}</span>
+                                    <div className="w-px h-2.5 bg-[#3A3430]" />
+                                    <span className="text-[10px] text-[#6B5E52] tracking-wide">{val}</span>
+                                </div>
+                            ))}
+                        </div>
                     </div>
                 </div>
             </div>
-        </div>
+        </>
     );
 }

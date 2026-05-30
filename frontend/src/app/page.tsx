@@ -6,8 +6,8 @@ const modules = [
     code: "01",
     label: "Live Feed",
     desc: "Real-time flagged transaction stream. Auto-polls every 5s.",
-    stat: "LIVE",
-    statColor: "#e63535",
+    badge: "Live",
+    badgeStyle: "bg-[#F5EAE0] text-[#D97B4F] border border-[#E8CDB8]",
     live: true,
   },
   {
@@ -15,362 +15,245 @@ const modules = [
     code: "02",
     label: "Investigate",
     desc: "Run a full 6-agent pipeline against any vendor or entity.",
-    stat: "6 AGENTS",
-    statColor: "#22d3ee",
-    live: false,
+    badge: "6 agents",
+    badgeStyle: "bg-[#E3EDF8] text-[#3B72B8] border border-[#C8DCF0]",
   },
   {
     href: "/report",
     code: "03",
     label: "Report",
-    desc: "Structured fraud report with risk gauge and evidence trail.",
-    stat: "BLOCKING",
-    statColor: "#f59e0b",
-    live: false,
+    desc: "Structured fraud report with risk gauge and full evidence trail.",
+    badge: "Blocking",
+    badgeStyle: "bg-[#F5EDD8] text-[#A87820] border border-[#E8D5A0]",
   },
   {
     href: "/graph",
     code: "04",
     label: "Graph",
-    desc: "Neo4j relationship map. Entities, transactions, sanctions.",
-    stat: "NEO4J",
-    statColor: "#a855f7",
-    live: false,
+    desc: "Relationship map of entities, transactions, and sanctions.",
+    badge: "Neo4j",
+    badgeStyle: "bg-[#EDE8F5] text-[#7B58B8] border border-[#D5C8EC]",
   },
   {
     href: "/trace",
     code: "05",
     label: "SQL Trace",
-    desc: "Coral federated query audit log with timing and cache status.",
-    stat: "AUDIT",
-    statColor: "#22c55e",
-    live: false,
+    desc: "Federated query audit log with timing and cache status.",
+    badge: "Audit",
+    badgeStyle: "bg-[#E3F0E8] text-[#3B8A52] border border-[#C0DCC8]",
   },
   {
     href: "/dashboard",
     code: "06",
     label: "Dashboard",
-    desc: "System overview — exposure, top vendors, query stats.",
-    stat: "OVERVIEW",
-    statColor: "#378add",
-    live: false,
-  },
-  {
-    href: "/timeline",
-    code: "07",
-    label: "Evidence Timeline",
-    desc: "Chronological reconstruction of all fraud evidence for any entity.",
-    stat: "TIMELINE",
-    statColor: "#f97316",
-    live: false,
+    desc: "System overview — exposure, top vendors, query statistics.",
+    badge: "Overview",
+    badgeStyle: "bg-[#E0F0F0] text-[#2A8080] border border-[#B0D8D8]",
   },
 ];
-const dimmed = [
-  { code: "06", label: "Dashboard", desc: "Coming soon" },
-  { code: "07", label: "Timeline", desc: "Coming soon" },
+
+const timelineSteps = [
+  { text: "Pick any vendor, account, or entity ID", active: true },
+  { text: "All evidence events sorted chronologically across sources", active: false },
+  { text: "Drill into transactions, flags, and agent findings at each point", active: false },
 ];
 
 export default function Home() {
   return (
     <>
       <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500&family=IBM+Plex+Sans:wght@300;400;500&display=swap');
-
-        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-
-        .home-root {
-          min-height: 100vh;
-          background: #020817;
-          font-family: 'IBM Plex Sans', sans-serif;
-          display: flex;
-          flex-direction: column;
-          align-items: center;
-          justify-content: center;
-          padding: 60px 32px;
-          position: relative;
-          overflow: hidden;
-        }
-
-        .grid-bg {
-          position: absolute;
-          inset: 0;
-          background-image:
-            linear-gradient(rgba(255,255,255,0.015) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,255,255,0.015) 1px, transparent 1px);
-          background-size: 48px 48px;
-          pointer-events: none;
-        }
-
-        .scan-line {
-          position: absolute;
-          top: 0; left: 0; right: 0;
-          height: 2px;
-          background: rgba(230, 53, 53, 0.15);
-          animation: scan 8s linear infinite;
-          pointer-events: none;
-        }
-        @keyframes scan {
-          0%   { top: 0; }
-          100% { top: 100%; }
-        }
-
-        .home-inner {
-          position: relative;
-          z-index: 1;
-          width: 100%;
-          max-width: 960px;
-        }
-
-        .brand-row {
-          display: flex;
-          align-items: baseline;
-          gap: 16px;
-          margin-bottom: 8px;
-        }
-
-        .brand {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 48px;
-          font-weight: 500;
-          letter-spacing: -0.02em;
-          color: #f1f5f9;
-          line-height: 1;
-        }
-        .brand em { color: #e63535; font-style: normal; }
-        .brand-slash { color: #1e293b; }
-
-        .brand-version {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 11px;
-          color: #334155;
-          letter-spacing: 0.1em;
-          padding: 3px 8px;
-          border: 1px solid #1e293b;
-          border-radius: 3px;
-        }
-
-        .tagline {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 13px;
-          color: #475569;
-          letter-spacing: 0.05em;
-          margin-bottom: 56px;
-        }
-        .tagline span { color: #e63535; }
-
-        .modules-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 1px;
-          background: #0f172a;
-          border: 1px solid #0f172a;
-          border-radius: 8px;
-          overflow: hidden;
-          margin-bottom: 1px;
-        }
-
-        .module-card {
-          background: #020817;
-          padding: 28px;
-          text-decoration: none;
-          display: flex;
-          flex-direction: column;
-          gap: 12px;
-          transition: background 0.15s;
-          cursor: pointer;
-          position: relative;
-        }
-        .module-card::after {
-          content: '';
-          position: absolute;
-          bottom: 0; left: 28px; right: 28px;
-          height: 1px;
-          background: #0f172a;
-        }
-        .module-card:hover { background: #0a1628; }
-        .module-card:hover .module-arrow { opacity: 1; transform: translateX(0); }
-
-        .module-top {
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .module-code {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 10px;
-          color: #1e293b;
-          letter-spacing: 0.15em;
-        }
-
-        .module-stat {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 9px;
-          letter-spacing: 0.12em;
-          padding: 3px 7px;
-          border-radius: 2px;
-        }
-
-        .live-dot {
-          display: inline-block;
-          width: 6px; height: 6px;
-          border-radius: 50%;
-          background: #e63535;
-          margin-right: 5px;
-          animation: blink 1.5s ease-in-out infinite;
-          vertical-align: middle;
-        }
-        @keyframes blink {
-          0%,100% { opacity: 1; }
-          50% { opacity: 0.2; }
-        }
-
-        .module-label {
-          font-family: 'IBM Plex Sans', sans-serif;
-          font-size: 20px;
-          font-weight: 500;
-          color: #f1f5f9;
-          letter-spacing: -0.01em;
-        }
-
-        .module-desc {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 12px;
-          color: #475569;
-          line-height: 1.6;
-        }
-
-        .module-arrow {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 12px;
-          color: #334155;
-          opacity: 0;
-          transform: translateX(-4px);
-          transition: all 0.15s;
-          margin-top: auto;
-        }
-
-        .dimmed-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-          gap: 1px;
-          background: #0a0a0a;
-          border: 1px solid #0a0a0a;
-          border-radius: 0 0 8px 8px;
-          overflow: hidden;
-        }
-
-        .module-card-dim {
-          background: #020817;
-          padding: 20px 28px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-        }
-
-        .dim-label {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 12px;
-          color: #1e293b;
-          letter-spacing: 0.08em;
-          text-transform: uppercase;
-        }
-
-        .dim-badge {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 9px;
-          color: #0f172a;
-          border: 1px solid #0f172a;
-          padding: 2px 7px;
-          border-radius: 2px;
-          letter-spacing: 0.1em;
-        }
-
-        .footer-row {
-          margin-top: 40px;
-          display: flex;
-          align-items: center;
-          justify-content: space-between;
-          flex-wrap: wrap;
-          gap: 12px;
-        }
-
-        .footer-stat {
-          font-family: 'IBM Plex Mono', monospace;
-          font-size: 10px;
-          color: #1e293b;
-          letter-spacing: 0.1em;
-        }
-        .footer-stat span { color: #334155; }
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Outfit:wght@300;400;500;600&display=swap');
+        .font-playfair { font-family: 'Playfair Display', serif; }
+        .font-outfit { font-family: 'Outfit', sans-serif; }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .animate-pulse-dot { animation: pulse-dot 2s ease-in-out infinite; }
+        .card-arrow { opacity: 0; transform: translateX(-6px); transition: all 0.18s; }
+        .module-card:hover .card-arrow { opacity: 1; transform: translateX(0); }
+        .module-card:hover .card-num { color: #D97B4F; }
+        .timeline-left:hover .card-arrow { opacity: 1; transform: translateX(0); }
+        .timeline-left:hover .tl-num { color: #D97B4F; }
       `}</style>
 
-      <div className="home-root">
-        <div className="grid-bg" />
-        <div className="scan-line" />
+      <div className="font-outfit bg-[#F7F3EE] min-h-screen text-[#1A1612]">
 
-        <div className="home-inner">
-          {/* Brand */}
-          <div className="brand-row">
-            <div className="brand">
-              <em>SENTINEL</em><span className="brand-slash">/</span>AI
+        {/* Top bar */}
+        <div className="bg-[#1A1612] flex items-center justify-between px-12 h-[52px]">
+          <div className="flex items-center gap-6">
+            <span className="font-outfit font-semibold text-sm tracking-widest text-[#F7F3EE] uppercase">
+              Sentinel
+            </span>
+            <div className="w-px h-4 bg-[#3A3430]" />
+            <span className="text-[11px] text-[#6B5E52] tracking-wide">
+              Fraud Investigation System
+            </span>
+          </div>
+          <div className="flex items-center gap-5">
+            <div className="flex items-center gap-2 bg-[#2A2420] border border-[#3A3430] rounded-full px-3 py-[5px]">
+              <div className="w-1.5 h-1.5 rounded-full bg-[#D97B4F] animate-pulse-dot" />
+              <span className="text-[11px] text-[#D97B4F] tracking-wider font-medium">
+                System online
+              </span>
             </div>
-            <div className="brand-version">v0.1.0-dev</div>
+            <span className="text-[11px] text-[#3A3430] tracking-wide">v0.1.0-dev</span>
           </div>
-          <div className="tagline">
-            Fraud investigation system — <span>6-agent pipeline</span> · PostgreSQL · Neo4j · Groq
-          </div>
+        </div>
 
-          {/* Module cards */}
-          <div className="modules-grid">
-            {modules.map(({ href, code, label, desc, stat, statColor, live }) => (
-              <Link key={href} href={href} className="module-card">
-                <div className="module-top">
-                  <span className="module-code">{code}</span>
-                  <span
-                    className="module-stat"
-                    style={{
-                      color: statColor,
-                      background: `${statColor}12`,
-                      border: `1px solid ${statColor}30`,
-                    }}
-                  >
-                    {live && <span className="live-dot" />}
-                    {stat}
-                  </span>
-                </div>
-                <div className="module-label">{label}</div>
-                <div className="module-desc">{desc}</div>
-                <div className="module-arrow">→ open</div>
-              </Link>
-            ))}
+        {/* Hero */}
+        <div className="px-12 pt-16 pb-14 grid grid-cols-[1fr_auto] items-end gap-10 border-b border-[#E0D8CF]">
+          <div>
+            <div className="flex items-center gap-2.5 mb-5">
+              <div className="w-6 h-px bg-[#D97B4F]" style={{ height: "1.5px" }} />
+              <span className="text-[11px] font-medium tracking-[0.18em] text-[#D97B4F] uppercase">
+                AI-powered detection
+              </span>
+            </div>
+            <h1 className="font-playfair text-[68px] font-black leading-[0.92] tracking-tight text-[#1A1612] mb-7">
+              Follow the<br />
+              <em className="text-[#8B5E3C]">money.</em>
+            </h1>
+            <p className="text-[15px] font-light text-[#6B5E52] leading-[1.75] max-w-[420px]">
+              A six-agent AI pipeline for real-time financial fraud investigation — built on PostgreSQL, Neo4j graph traversal, and Groq inference.
+            </p>
           </div>
-
-          {/* Dimmed / coming soon */}
-          <div className="dimmed-grid">
-            {dimmed.map(({ code, label }) => (
-              <div key={code} className="module-card-dim">
-                <span className="dim-label">{code} — {label}</span>
-                <span className="dim-badge">SOON</span>
+          <div className="flex flex-row gap-2 items-end pb-1">
+            {[
+              { num: "6", lbl: "Active agents" },
+              { num: "Neo4j", lbl: "Graph engine" },
+              { num: "70B", lbl: "LLaMA via Groq" },
+            ].map(({ num, lbl }) => (
+              <div
+                key={lbl}
+                className="flex items-baseline gap-2 bg-[#EDE7DF] border border-[#D8CEBF] rounded-md px-4 py-2.5 whitespace-nowrap"
+              >
+                <span className="font-playfair text-[22px] font-bold text-[#1A1612]">{num}</span>
+                <span className="text-[11px] text-[#9B8E82] tracking-wide font-normal">{lbl}</span>
               </div>
             ))}
           </div>
+        </div>
 
-          {/* Footer */}
-          <div className="footer-row">
-            <span className="footer-stat">
-              SENTINELDB · <span>port 5433</span>
+        {/* Modules */}
+        <div className="px-12 pb-12">
+          <div className="flex items-center justify-between py-8 border-b border-[#E0D8CF] mb-px">
+            <span className="text-[11px] font-medium tracking-[0.2em] text-[#9B8E82] uppercase">
+              Modules
             </span>
-            <span className="footer-stat">
-              NEO4J · <span>port 7687</span>
-            </span>
-            <span className="footer-stat">
-              API · <span>port 8000</span>
-            </span>
-            <span className="footer-stat">
-              GROQ · <span>llama-3.3-70b-versatile</span>
+            <span className="text-[11px] text-[#C4B8AC] tracking-wide">
+              7 active &nbsp;·&nbsp; 1 coming soon
             </span>
           </div>
+
+          <div className="grid grid-cols-3">
+            {modules.map(({ href, code, label, desc, badge, badgeStyle, live }, i) => (
+              <Link
+                key={href}
+                href={href}
+                className={`module-card flex flex-col border-b border-[#E0D8CF] p-7 bg-[#F7F3EE] hover:bg-[#F0E9E0] transition-colors duration-200 cursor-pointer
+                  ${(i + 1) % 3 !== 0 ? "border-r border-[#E0D8CF]" : ""}`}
+              >
+                <div className="flex items-center justify-between mb-[18px]">
+                  <span className="card-num text-[11px] font-medium tracking-[0.15em] text-[#C4B8AC] transition-colors duration-200">
+                    {code}
+                  </span>
+                  <span className={`text-[10px] font-medium tracking-wide px-2.5 py-[3px] rounded-full ${badgeStyle}`}>
+                    {live && (
+                      <span
+                        className="inline-block w-[5px] h-[5px] bg-[#D97B4F] rounded-full mr-[5px] animate-pulse-dot"
+                        style={{ verticalAlign: "1px" }}
+                      />
+                    )}
+                    {badge}
+                  </span>
+                </div>
+                <div className="font-playfair text-[22px] font-bold text-[#1A1612] mb-2 leading-tight">
+                  {label}
+                </div>
+                <div className="text-[13px] font-light text-[#9B8E82] leading-[1.65] flex-1">
+                  {desc}
+                </div>
+                <div className="card-arrow mt-5 text-[12px] text-[#D97B4F] font-medium tracking-wide">
+                  Open module →
+                </div>
+              </Link>
+            ))}
+
+            {/* Evidence Timeline — full-width card */}
+            <div className="col-span-3 grid grid-cols-[1fr_2fr]">
+              <Link
+                href="/timeline"
+                className="timeline-left flex flex-col p-7 border-r border-[#E0D8CF] bg-[#F7F3EE] hover:bg-[#F0E9E0] transition-colors duration-200"
+              >
+                <div className="flex items-center justify-between mb-[18px]">
+                  <span className="tl-num text-[11px] font-medium tracking-[0.15em] text-[#C4B8AC] transition-colors duration-200">
+                    07
+                  </span>
+                  <span className="text-[10px] font-medium tracking-wide px-2.5 py-[3px] rounded-full bg-[#F5EBE0] text-[#C06030] border border-[#E8CEB0]">
+                    Timeline
+                  </span>
+                </div>
+                <div className="font-playfair text-[22px] font-bold text-[#1A1612] mb-2 leading-tight">
+                  Evidence Timeline
+                </div>
+                <div className="text-[13px] font-light text-[#9B8E82] leading-[1.65] flex-1">
+                  Chronological reconstruction of all fraud evidence for any entity.
+                </div>
+                <div className="card-arrow mt-5 text-[12px] text-[#D97B4F] font-medium tracking-wide">
+                  Open module →
+                </div>
+              </Link>
+              <div className="flex flex-col justify-center p-8 bg-[#F0E9E0]">
+                <div className="text-[11px] text-[#C4B8AC] tracking-[0.12em] uppercase mb-3.5">
+                  How it works
+                </div>
+                <div className="flex flex-col gap-2.5">
+                  {timelineSteps.map(({ text, active }) => (
+                    <div key={text} className="flex items-start gap-3">
+                      <div
+                        className={`w-1.5 h-1.5 rounded-full mt-[5px] shrink-0 ${active ? "bg-[#D97B4F]" : "bg-[#C4B8AC]"
+                          }`}
+                      />
+                      <span className="text-[13px] text-[#6B5E52] font-light leading-relaxed">
+                        {text}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          {/* Coming soon */}
+          <div className="border-t border-[#E0D8CF] mt-20">
+            {/* <div className="flex items-center justify-between px-7 py-3.5">
+              <span className="text-[12px] text-[#C4B8AC] tracking-wide">
+                08 — Risk Scoring Engine
+              </span>
+              <span className="text-[10px] tracking-widest text-[#C4B8AC] border border-[#DDD4C8] px-2 py-[2px] rounded-full">
+                Coming soon
+              </span>
+            </div> */}
+          </div>
         </div>
+
+        {/* Footer */}
+        <div className="bg-white/50 backdrop-blur-sm px-12 py-5 flex items-center justify-between flex-wrap gap-4 fixed bottom-0 left-0 right-0">
+          <div className="flex justify-center w-full gap-8 flex-wrap">
+            {[
+              { key: "SentinelDB", val: "port 5433" },
+              { key: "Neo4j", val: "port 7687" },
+              { key: "API", val: "port 8000" },
+              { key: "Model", val: "GROQ - llama-3.3-70b-versatile" },
+              { key: "Developed by", val: "Partha Chakraborty, Dhvani Dave" }
+            ].map(({ key, val }) => (
+              <div key={key} className="flex items-center gap-2">
+                <span className="text-[10px] tracking-widest text-[#3A3430] uppercase">{key}</span>
+                <div className="w-px h-2.5 bg-[#3A3430]" />
+                <span className="text-[10px] text-[#6B5E52] tracking-wide">{val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+
       </div>
     </>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -35,145 +36,65 @@ function parseSources(raw: string[] | string | null): string[] {
 
 function formatTime(iso: string | null): string {
     if (!iso) return "—";
-    const d = new Date(iso);
-    return d.toLocaleTimeString("en-US", {
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        hour12: false,
+    return new Date(iso).toLocaleTimeString("en-US", {
+        hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false,
     });
 }
 
 function formatDate(iso: string | null): string {
     if (!iso) return "—";
-    const d = new Date(iso);
-    return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+    return new Date(iso).toLocaleDateString("en-US", {
+        month: "short", day: "numeric", year: "numeric",
+    });
 }
 
-const SOURCE_COLORS: Record<string, string> = {
-    transactions: "#f59e0b",
-    sanctions: "#ef4444",
-    emails: "#3b82f6",
-    slack_logs: "#8b5cf6",
-    coral_traces: "#6b7280",
+const SOURCE_STYLES: Record<string, string> = {
+    transactions: "bg-[#F5EDD8] text-[#A87820] border border-[#E8D5A0]",
+    sanctions: "bg-[#F5E8E8] text-[#C0392B] border border-[#E8C8C8]",
+    emails: "bg-[#E3EDF8] text-[#3B72B8] border border-[#C8DCF0]",
+    slack_logs: "bg-[#EDE8F5] text-[#7B58B8] border border-[#D5C8EC]",
+    coral_traces: "bg-[#EDE7DF] text-[#9B8E82] border border-[#D8CEBF]",
 };
 
-function sourceColor(s: string): string {
-    return SOURCE_COLORS[s.toLowerCase()] ?? "#22d3ee";
+function getSourceStyle(s: string): string {
+    return SOURCE_STYLES[s.toLowerCase()] ?? "bg-[#E3F0E8] text-[#3B8A52] border border-[#C0DCC8]";
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-function SourceBadge({ source }: { source: string }) {
-    const color = sourceColor(source);
-    return (
-        <span
-            style={{
-                display: "inline-block",
-                padding: "2px 8px",
-                borderRadius: "3px",
-                fontSize: "10px",
-                fontFamily: "'DM Mono', 'Fira Code', monospace",
-                fontWeight: 600,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                color: color,
-                border: `1px solid ${color}40`,
-                background: `${color}12`,
-                marginRight: "4px",
-                marginBottom: "2px",
-            }}
-        >
-            {source}
-        </span>
-    );
+function getExecColor(ms: number): string {
+    if (ms > 1000) return "text-[#C0392B]";
+    if (ms > 300) return "text-[#A87820]";
+    return "text-[#3B8A52]";
 }
+
+// ─── SQL Block ────────────────────────────────────────────────────────────────
 
 function SqlBlock({ sql }: { sql: string }) {
     const [expanded, setExpanded] = useState(false);
     const preview = sql.length > 120 ? sql.slice(0, 120) + "…" : sql;
 
-    // Minimal SQL keyword highlighting
     const highlight = (text: string) => {
         const keywords = /\b(SELECT|FROM|WHERE|JOIN|LEFT|INNER|ON|AND|OR|NOT|IN|LIKE|LIMIT|OFFSET|ORDER BY|GROUP BY|HAVING|INSERT|UPDATE|DELETE|WITH|AS|DISTINCT|COUNT|SUM|AVG|MAX|MIN|CASE|WHEN|THEN|ELSE|END|NULL|IS|BETWEEN|EXISTS)\b/gi;
         const parts = text.split(keywords);
         return parts.map((part, i) =>
-            keywords.test(part) ? (
-                <span key={i} style={{ color: "#22d3ee", fontWeight: 700 }}>
-                    {part}
-                </span>
-            ) : (
-                <span key={i} style={{ color: "#94a3b8" }}>
-                    {part}
-                </span>
-            )
+            keywords.test(part)
+                ? <span key={i} className="text-[#D97B4F] font-semibold">{part}</span>
+                : <span key={i} className="text-[#9B8E82]">{part}</span>
         );
     };
 
     return (
-        <div style={{ position: "relative" }}>
-            <pre
-                style={{
-                    margin: 0,
-                    fontFamily: "'DM Mono', 'Fira Code', 'Cascadia Code', monospace",
-                    fontSize: "12px",
-                    lineHeight: "1.6",
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    color: "#94a3b8",
-                    background: "transparent",
-                }}
-            >
+        <div>
+            <pre className="m-0 text-[12px] leading-relaxed whitespace-pre-wrap break-words bg-transparent font-outfit">
                 {highlight(expanded ? sql : preview)}
             </pre>
             {sql.length > 120 && (
                 <button
                     onClick={() => setExpanded(!expanded)}
-                    style={{
-                        marginTop: "4px",
-                        background: "none",
-                        border: "none",
-                        color: "#22d3ee",
-                        fontSize: "11px",
-                        fontFamily: "'DM Mono', monospace",
-                        cursor: "pointer",
-                        padding: 0,
-                        opacity: 0.8,
-                    }}
+                    className="mt-1 text-[11px] text-[#D97B4F] hover:text-[#8B5E3C] transition-colors font-outfit tracking-wide"
                 >
                     {expanded ? "▲ collapse" : "▼ expand"}
                 </button>
             )}
-        </div>
-    );
-}
-
-function StatCard({
-    label,
-    value,
-    accent,
-}: {
-    label: string;
-    value: string | number;
-    accent: string;
-}) {
-    return (
-        <div
-            style={{
-                background: "#0f172a",
-                border: `1px solid ${accent}30`,
-                borderLeft: `3px solid ${accent}`,
-                borderRadius: "6px",
-                padding: "14px 18px",
-                minWidth: "140px",
-            }}
-        >
-            <div style={{ fontSize: "11px", color: "#64748b", fontFamily: "'DM Mono', monospace", letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: "6px" }}>
-                {label}
-            </div>
-            <div style={{ fontSize: "24px", fontFamily: "'Space Grotesk', sans-serif", fontWeight: 700, color: accent }}>
-                {value}
-            </div>
         </div>
     );
 }
@@ -186,8 +107,8 @@ export default function TracePage() {
     const [loading, setLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [offset, setOffset] = useState(0);
-    const [filterSource, setFilterSource] = useState<string>("all");
-    const [filterCache, setFilterCache] = useState<string>("all");
+    const [filterSource, setFilterSource] = useState("all");
+    const [filterCache, setFilterCache] = useState("all");
     const [clearing, setClearing] = useState(false);
     const [autoRefresh, setAutoRefresh] = useState(false);
     const LIMIT = 20;
@@ -207,9 +128,7 @@ export default function TracePage() {
         }
     }, [offset]);
 
-    useEffect(() => {
-        fetchTraces();
-    }, [fetchTraces]);
+    useEffect(() => { fetchTraces(); }, [fetchTraces]);
 
     useEffect(() => {
         if (!autoRefresh) return;
@@ -222,269 +141,207 @@ export default function TracePage() {
         setClearing(true);
         try {
             await fetch("http://localhost:8000/traces", { method: "DELETE" });
-            setTraces([]);
-            setTotal(0);
-            setOffset(0);
+            setTraces([]); setTotal(0); setOffset(0);
         } finally {
             setClearing(false);
         }
     };
 
-    // Filtered view (client-side on current page)
     const filtered = traces.filter((t) => {
         const sources = parseSources(t.sources_hit);
-        const sourceMatch =
-            filterSource === "all" || sources.some((s) => s.toLowerCase() === filterSource);
-        const cacheMatch =
-            filterCache === "all" ||
-            (filterCache === "hit" && t.cache_hit === true) ||
-            (filterCache === "miss" && t.cache_hit === false);
+        const sourceMatch = filterSource === "all" || sources.some(s => s.toLowerCase() === filterSource);
+        const cacheMatch = filterCache === "all"
+            || (filterCache === "hit" && t.cache_hit === true)
+            || (filterCache === "miss" && t.cache_hit === false);
         return sourceMatch && cacheMatch;
     });
 
-    // Stats
-    const avgMs =
-        traces.length > 0
-            ? Math.round(traces.reduce((a, t) => a + (t.execution_ms ?? 0), 0) / traces.length)
-            : 0;
-    const cacheHits = traces.filter((t) => t.cache_hit === true).length;
-    const multiSource = traces.filter((t) => parseSources(t.sources_hit).length > 1).length;
-    const allSources = Array.from(
-        new Set(traces.flatMap((t) => parseSources(t.sources_hit).map((s) => s.toLowerCase())))
-    ).sort();
-
+    const avgMs = traces.length > 0 ? Math.round(traces.reduce((a, t) => a + (t.execution_ms ?? 0), 0) / traces.length) : 0;
+    const cacheHits = traces.filter(t => t.cache_hit === true).length;
+    const multiSrc = traces.filter(t => parseSources(t.sources_hit).length > 1).length;
+    const allSources = Array.from(new Set(traces.flatMap(t => parseSources(t.sources_hit).map(s => s.toLowerCase())))).sort();
     const totalPages = Math.ceil(total / LIMIT);
     const currentPage = Math.floor(offset / LIMIT) + 1;
 
     return (
         <>
-            {/* Google Fonts */}
             <style>{`
-        @import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Space+Grotesk:wght@400;600;700&display=swap');
-
-        * { box-sizing: border-box; margin: 0; padding: 0; }
-
-        body {
-          background: #020817;
-          color: #e2e8f0;
-          font-family: 'Space Grotesk', sans-serif;
-        }
-
-        .trace-row {
-          border-bottom: 1px solid #1e293b;
-          transition: background 0.15s;
-        }
-        .trace-row:hover {
-          background: #0f172a !important;
-        }
-
-        .btn {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 7px 14px;
-          border-radius: 5px;
-          font-family: 'DM Mono', monospace;
-          font-size: 12px;
-          cursor: pointer;
-          transition: all 0.15s;
-          border: 1px solid transparent;
-        }
-        .btn:hover { opacity: 0.85; }
-        .btn-primary {
-          background: #22d3ee18;
-          border-color: #22d3ee50;
-          color: #22d3ee;
-        }
-        .btn-danger {
-          background: #ef444418;
-          border-color: #ef444450;
-          color: #ef4444;
-        }
-        .btn-ghost {
-          background: transparent;
-          border-color: #334155;
-          color: #64748b;
-        }
-        .btn-ghost.active {
-          border-color: #22d3ee60;
-          color: #22d3ee;
-          background: #22d3ee10;
-        }
-
-        select {
-          background: #0f172a;
-          border: 1px solid #1e293b;
-          border-radius: 5px;
-          color: #94a3b8;
-          font-family: 'DM Mono', monospace;
-          font-size: 12px;
-          padding: 6px 10px;
-          cursor: pointer;
-          outline: none;
-        }
-        select:focus { border-color: #22d3ee50; }
-
-        ::-webkit-scrollbar { width: 4px; height: 4px; }
-        ::-webkit-scrollbar-track { background: #0f172a; }
-        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 2px; }
-
-        .pulse-dot {
-          width: 8px; height: 8px;
-          border-radius: 50%;
-          background: #22d3ee;
-          animation: pulse 1.5s ease-in-out infinite;
-        }
-        @keyframes pulse {
-          0%, 100% { opacity: 1; transform: scale(1); }
-          50% { opacity: 0.4; transform: scale(0.8); }
-        }
-
-        .fade-in {
-          animation: fadeIn 0.3s ease forwards;
-        }
-        @keyframes fadeIn {
-          from { opacity: 0; transform: translateY(4px); }
-          to { opacity: 1; transform: translateY(0); }
-        }
+        @import url('https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,700;0,900;1,700&family=Outfit:wght@300;400;500;600&display=swap');
+        .font-playfair { font-family: 'Playfair Display', serif; }
+        .font-outfit   { font-family: 'Outfit', sans-serif; }
+        @keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+        .animate-pulse-dot  { animation: pulse-dot 2s ease-in-out infinite; }
+        @keyframes fade-in   { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fade-in 0.25s ease forwards; }
+        .trace-row { transition: background 0.15s; }
+        .trace-row:hover { background: #F0E9E0 !important; }
       `}</style>
 
-            <div style={{ background: "#020817", padding: "0 0 60px 0" }}>
+            <div className="font-outfit bg-[#F7F3EE] min-h-screen text-[#1A1612]">
 
-                {/* ── Header ── */}
-                <div style={{
-                    borderBottom: "1px solid #1e293b",
-                    background: "#020817",
-                    position: "sticky",
-                    top: 0,
-                    zIndex: 50,
-                    padding: "0 32px",
-                }}>
-                    <div style={{ maxWidth: "1400px", margin: "0 auto", display: "flex", alignItems: "center", justifyContent: "space-between", height: "60px" }}>
-                        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "11px", color: "#22d3ee", letterSpacing: "0.15em" }}>SENTINEL</span>
-                            <span style={{ color: "#1e293b" }}>›</span>
-                            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "11px", color: "#64748b", letterSpacing: "0.1em" }}>SQL TRACE</span>
-                        </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                            <button
-                                className={`btn btn-ghost ${autoRefresh ? "active" : ""}`}
-                                onClick={() => setAutoRefresh(!autoRefresh)}
-                            >
-                                {autoRefresh && <span className="pulse-dot" />}
-                                {autoRefresh ? "live" : "auto-refresh"}
-                            </button>
-                            <button className="btn btn-primary" onClick={fetchTraces}>
-                                ↺ refresh
-                            </button>
-                            <button className="btn btn-danger" onClick={clearTraces} disabled={clearing}>
-                                {clearing ? "clearing…" : "clear log"}
-                            </button>
+                {/* ── Top bar ── */}
+                <div className="bg-[#1A1612] flex items-center justify-between px-12 h-[52px] sticky top-0 z-50">
+                    <div className="flex items-center gap-6">
+                        <Link href="/">
+                            <span className="font-outfit font-semibold text-sm tracking-widest text-[#F7F3EE] uppercase cursor-pointer">
+                                Sentinel
+                            </span>
+                        </Link>
+                        <div className="w-px h-4 bg-[#3A3430]" />
+                        <span className="text-[11px] text-[#6B5E52] tracking-wide">SQL Trace</span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                        {/* Auto-refresh toggle */}
+                        <button
+                            onClick={() => setAutoRefresh(!autoRefresh)}
+                            className={`flex items-center gap-2 px-3 py-[5px] rounded-full border text-[11px] font-medium tracking-wider transition-all
+                ${autoRefresh
+                                    ? "bg-[#2A2420] border-[#D97B4F]/40 text-[#D97B4F]"
+                                    : "bg-[#2A2420] border-[#3A3430] text-[#6B5E52] hover:text-[#9B8E82]"
+                                }`}
+                        >
+                            {autoRefresh && <div className="w-1.5 h-1.5 rounded-full bg-[#D97B4F] animate-pulse-dot" />}
+                            {autoRefresh ? "Live" : "Auto-refresh"}
+                        </button>
+                        <button
+                            onClick={fetchTraces}
+                            className="flex items-center gap-2 px-3 py-[5px] rounded-full bg-[#2A2420] border border-[#3A3430] text-[11px] font-medium tracking-wider text-[#9B8E82] hover:text-[#F7F3EE] transition-all"
+                        >
+                            ↺ Refresh
+                        </button>
+                        <button
+                            onClick={clearTraces}
+                            disabled={clearing}
+                            className="flex items-center gap-2 px-3 py-[5px] rounded-full bg-[#2A2420] border border-[#C0392B]/30 text-[11px] font-medium tracking-wider text-[#C0392B] hover:border-[#C0392B]/60 transition-all disabled:opacity-40"
+                        >
+                            {clearing ? "Clearing…" : "Clear log"}
+                        </button>
+                        <div className="flex items-center gap-2 bg-[#2A2420] border border-[#3A3430] rounded-full px-3 py-[5px]">
+                            <span className="text-[11px] text-[#D97B4F] tracking-wider font-medium">Module 05</span>
                         </div>
                     </div>
                 </div>
 
-                <div style={{ maxWidth: "1400px", margin: "0 auto", padding: "32px 32px 0" }}>
-
-                    {/* ── Page title ── */}
-                    <div style={{ marginBottom: "28px" }}>
-                        <h1 style={{ fontSize: "28px", fontWeight: 700, letterSpacing: "-0.02em", color: "#f1f5f9" }}>
-                            Query Execution Log
-                        </h1>
-                        <p style={{ marginTop: "6px", fontSize: "14px", color: "#64748b", fontFamily: "'DM Mono', monospace" }}>
-                            Every Coral federated query — sources, timing, cache status
-                        </p>
-                    </div>
-
-                    {/* ── Stat cards ── */}
-                    <div style={{ display: "flex", gap: "12px", flexWrap: "wrap", marginBottom: "28px" }}>
-                        <StatCard label="total queries" value={total} accent="#22d3ee" />
-                        <StatCard label="avg latency" value={`${avgMs}ms`} accent="#f59e0b" />
-                        <StatCard label="cache hits" value={cacheHits} accent="#22c55e" />
-                        <StatCard label="multi-source" value={multiSource} accent="#a855f7" />
-                    </div>
-
-                    {/* ── Filters ── */}
-                    <div style={{ display: "flex", gap: "10px", marginBottom: "20px", alignItems: "center", flexWrap: "wrap" }}>
-                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "11px", color: "#475569", marginRight: "4px" }}>FILTER:</span>
-                        <select value={filterSource} onChange={(e) => setFilterSource(e.target.value)}>
-                            <option value="all">all sources</option>
-                            {allSources.map((s) => (
-                                <option key={s} value={s}>{s}</option>
-                            ))}
-                        </select>
-                        <select value={filterCache} onChange={(e) => setFilterCache(e.target.value)}>
-                            <option value="all">cache: all</option>
-                            <option value="hit">cache: hit</option>
-                            <option value="miss">cache: miss</option>
-                        </select>
-                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "11px", color: "#475569", marginLeft: "auto" }}>
-                            {filtered.length} of {traces.length} shown
+                {/* ── Page header ── */}
+                <div className="px-12 pt-12 pb-10 border-b border-[#E0D8CF]">
+                    <div className="flex items-center gap-2.5 mb-4">
+                        <div className="w-6 bg-[#D97B4F]" style={{ height: "1.5px" }} />
+                        <span className="text-[11px] font-medium tracking-[0.18em] text-[#D97B4F] uppercase">
+                            Federated query audit log
                         </span>
                     </div>
+                    <div className="flex items-end justify-between gap-10">
+                        <div>
+                            <h1 className="font-playfair text-[52px] font-black leading-[0.92] tracking-tight text-[#1A1612] mb-4">
+                                SQL <em className="text-[#8B5E3C]">Trace.</em>
+                            </h1>
+                            <p className="text-[14px] font-light text-[#6B5E52] leading-[1.75] max-w-[400px]">
+                                Every Coral federated query — sources hit, execution timing, and cache status.
+                            </p>
+                        </div>
 
-                    {/* ── Table ── */}
-                    {loading ? (
-                        <div style={{ textAlign: "center", padding: "80px 0", color: "#475569", fontFamily: "'DM Mono', monospace", fontSize: "13px" }}>
-                            <div style={{ marginBottom: "16px" }}>
-                                <span className="pulse-dot" style={{ display: "inline-block" }} />
-                            </div>
-                            loading traces…
-                        </div>
-                    ) : error ? (
-                        <div style={{
-                            background: "#ef444412",
-                            border: "1px solid #ef444430",
-                            borderRadius: "8px",
-                            padding: "24px",
-                            color: "#ef4444",
-                            fontFamily: "'DM Mono', monospace",
-                            fontSize: "13px",
-                        }}>
-                            ✗ {error}
-                            <div style={{ marginTop: "8px", color: "#94a3b8", fontSize: "12px" }}>
-                                Is the backend running on port 8000?
-                            </div>
-                        </div>
-                    ) : filtered.length === 0 ? (
-                        <div style={{
-                            textAlign: "center",
-                            padding: "80px 0",
-                            color: "#475569",
-                            fontFamily: "'DM Mono', monospace",
-                            fontSize: "13px",
-                            border: "1px dashed #1e293b",
-                            borderRadius: "8px",
-                        }}>
-                            no traces found
-                            {total === 0 && (
-                                <div style={{ marginTop: "10px", fontSize: "12px", color: "#334155" }}>
-                                    run an investigation to populate the log
+                        {/* Stat chips */}
+                        <div className="flex items-baseline gap-2 flex-wrap justify-end">
+                            {[
+                                { num: total, lbl: "Total queries" },
+                                { num: `${avgMs}ms`, lbl: "Avg latency" },
+                                { num: cacheHits, lbl: "Cache hits" },
+                                { num: multiSrc, lbl: "Multi-source" },
+                            ].map(({ num, lbl }) => (
+                                <div key={lbl} className="flex items-baseline gap-2 bg-[#EDE7DF] border border-[#D8CEBF] rounded-md px-4 py-2.5 whitespace-nowrap">
+                                    <span className="font-playfair text-[20px] font-bold text-[#1A1612]">{num}</span>
+                                    <span className="text-[10px] text-[#9B8E82] tracking-wide font-normal">{lbl}</span>
                                 </div>
+                            ))}
+                        </div>
+                    </div>
+                </div>
+
+                {/* ── Filters ── */}
+                <div className="px-12 py-4 border-b border-[#E0D8CF] flex items-center gap-4 flex-wrap bg-[#F7F3EE]">
+                    <div className="flex items-center gap-2">
+                        <div className="w-3 bg-[#D97B4F]" style={{ height: "1.5px" }} />
+                        <span className="text-[10px] font-medium tracking-[0.2em] text-[#9B8E82] uppercase">Filter</span>
+                    </div>
+
+                    {/* Source filter */}
+                    <select
+                        value={filterSource}
+                        onChange={e => setFilterSource(e.target.value)}
+                        className="bg-white border border-[#E0D8CF] rounded-md px-3 py-1.5 text-[12px] text-[#4A3E35] font-outfit outline-none focus:border-[#D97B4F] transition-colors cursor-pointer"
+                    >
+                        <option value="all">All sources</option>
+                        {allSources.map(s => <option key={s} value={s}>{s}</option>)}
+                    </select>
+
+                    {/* Cache filter */}
+                    <select
+                        value={filterCache}
+                        onChange={e => setFilterCache(e.target.value)}
+                        className="bg-white border border-[#E0D8CF] rounded-md px-3 py-1.5 text-[12px] text-[#4A3E35] font-outfit outline-none focus:border-[#D97B4F] transition-colors cursor-pointer"
+                    >
+                        <option value="all">Cache: all</option>
+                        <option value="hit">Cache: hit</option>
+                        <option value="miss">Cache: miss</option>
+                    </select>
+
+                    <span className="ml-auto text-[11px] text-[#C4B8AC] tracking-wide font-outfit">
+                        {filtered.length} of {traces.length} shown
+                    </span>
+                </div>
+
+                {/* ── Content ── */}
+                <div className="px-12 py-8 pb-28">
+
+                    {/* Loading */}
+                    {loading && (
+                        <div className="text-center py-32">
+                            <div className="text-[11px] tracking-[0.2em] text-[#9B8E82] mb-6 uppercase">Loading traces…</div>
+                            <div className="flex justify-center gap-2">
+                                {["SQL", "CACHE", "TIMING", "SOURCES"].map((s, i) => (
+                                    <div key={s}
+                                        className="px-3 py-1.5 border border-[#D8CEBF] rounded-full text-[10px] tracking-widest text-[#C4B8AC] font-outfit"
+                                        style={{ animation: `pulse-dot 1.5s ease-in-out ${i * 0.2}s infinite` }}
+                                    >{s}</div>
+                                ))}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* Error */}
+                    {!loading && error && (
+                        <div className="bg-[#F5E8E8] border border-[#E8C8C8] rounded-xl p-8 text-center">
+                            <div className="font-playfair text-4xl text-[#E8C8C8] mb-3">⚠</div>
+                            <p className="font-playfair text-xl font-bold text-[#C0392B] mb-2">Connection Error</p>
+                            <p className="text-[12px] font-light text-[#9B8E82] mb-1">{error}</p>
+                            <p className="text-[11px] text-[#C4B8AC]">Is the backend running on port 8000?</p>
+                        </div>
+                    )}
+
+                    {/* Empty */}
+                    {!loading && !error && filtered.length === 0 && (
+                        <div className="text-center py-32">
+                            <div className="font-playfair text-7xl text-[#E0D8CF] mb-5">⬡</div>
+                            <div className="text-[11px] tracking-[0.2em] text-[#C4B8AC] font-outfit uppercase mb-2">
+                                No traces found
+                            </div>
+                            {total === 0 && (
+                                <p className="text-[12px] font-light text-[#C4B8AC]">
+                                    Run an investigation to populate the log.
+                                </p>
                             )}
                         </div>
-                    ) : (
-                        <div style={{
-                            border: "1px solid #1e293b",
-                            borderRadius: "8px",
-                            overflow: "hidden",
-                        }}>
+                    )}
+
+                    {/* Table */}
+                    {!loading && !error && filtered.length > 0 && (
+                        <div className="border border-[#E0D8CF] rounded-xl overflow-hidden">
+
                             {/* Table header */}
-                            <div style={{
-                                display: "grid",
-                                gridTemplateColumns: "56px 1fr 220px 90px 80px 100px",
-                                background: "#0a1628",
-                                borderBottom: "1px solid #1e293b",
-                                padding: "10px 16px",
-                            }}>
-                                {["#", "SQL QUERY", "SOURCES HIT", "EXEC MS", "CACHE", "TIME"].map((h) => (
-                                    <div key={h} style={{
-                                        fontFamily: "'DM Mono', monospace",
-                                        fontSize: "10px",
-                                        letterSpacing: "0.12em",
-                                        color: "#475569",
-                                        fontWeight: 600,
-                                    }}>
+                            <div className="grid bg-[#EDE7DF] border-b border-[#E0D8CF] px-6 py-3"
+                                style={{ gridTemplateColumns: "48px 1fr 200px 90px 80px 110px" }}>
+                                {["#", "SQL Query", "Sources Hit", "Exec", "Cache", "Time"].map(h => (
+                                    <div key={h} className="text-[10px] font-medium tracking-[0.15em] text-[#9B8E82] uppercase font-outfit">
                                         {h}
                                     </div>
                                 ))}
@@ -497,156 +354,146 @@ export default function TracePage() {
                                 return (
                                     <div
                                         key={trace.id}
-                                        className="trace-row fade-in"
+                                        className="trace-row fade-in grid border-b border-[#E0D8CF] px-6 py-4 items-start gap-3"
                                         style={{
-                                            display: "grid",
-                                            gridTemplateColumns: "56px 1fr 220px 90px 80px 100px",
-                                            padding: "14px 16px",
-                                            background: idx % 2 === 0 ? "#020817" : "#050d1a",
-                                            alignItems: "start",
-                                            gap: "8px",
+                                            gridTemplateColumns: "48px 1fr 200px 90px 80px 110px",
+                                            background: idx % 2 === 0 ? "#F7F3EE" : "#FFFFFF",
                                         }}
                                     >
-                                        {/* # */}
-                                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", color: "#334155", paddingTop: "1px" }}>
+                                        {/* Row number */}
+                                        <div className="text-[11px] text-[#C4B8AC] font-outfit pt-0.5">
                                             {offset + idx + 1}
                                         </div>
 
                                         {/* SQL */}
                                         <div>
                                             {isMulti && (
-                                                <div style={{
-                                                    display: "inline-flex",
-                                                    alignItems: "center",
-                                                    gap: "5px",
-                                                    background: "#a855f718",
-                                                    border: "1px solid #a855f730",
-                                                    borderRadius: "3px",
-                                                    padding: "2px 8px",
-                                                    marginBottom: "8px",
-                                                    fontSize: "10px",
-                                                    fontFamily: "'DM Mono', monospace",
-                                                    color: "#a855f7",
-                                                    letterSpacing: "0.08em",
-                                                }}>
-                                                    ⬡ FEDERATED · {sources.length} SOURCES
+                                                <div className="inline-flex items-center gap-1.5 bg-[#EDE8F5] border border-[#D5C8EC] rounded-full px-2.5 py-0.5 mb-2">
+                                                    <span className="text-[9px] font-semibold tracking-widest text-[#7B58B8] font-outfit">
+                                                        ⬡ FEDERATED · {sources.length} SOURCES
+                                                    </span>
                                                 </div>
                                             )}
                                             <SqlBlock sql={trace.query_text ?? "—"} />
                                         </div>
 
                                         {/* Sources */}
-                                        <div style={{ display: "flex", flexWrap: "wrap", alignContent: "flex-start", gap: "4px" }}>
+                                        <div className="flex flex-wrap gap-1.5 content-start">
                                             {sources.length > 0
-                                                ? sources.map((s) => <SourceBadge key={s} source={s} />)
-                                                : <span style={{ color: "#334155", fontFamily: "'DM Mono', monospace", fontSize: "11px" }}>—</span>
+                                                ? sources.map(s => (
+                                                    <span key={s} className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold tracking-wide border font-outfit ${getSourceStyle(s)}`}>
+                                                        {s.toUpperCase()}
+                                                    </span>
+                                                ))
+                                                : <span className="text-[11px] text-[#C4B8AC]">—</span>
                                             }
                                         </div>
 
                                         {/* Exec ms */}
-                                        <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "13px", paddingTop: "1px" }}>
+                                        <div className="pt-0.5">
                                             {trace.execution_ms != null ? (
-                                                <span style={{
-                                                    color: trace.execution_ms > 1000 ? "#ef4444" : trace.execution_ms > 300 ? "#f59e0b" : "#22c55e"
-                                                }}>
+                                                <span className={`font-playfair text-[18px] font-bold ${getExecColor(trace.execution_ms)}`}>
                                                     {trace.execution_ms}
-                                                    <span style={{ fontSize: "10px", color: "#475569", marginLeft: "2px" }}>ms</span>
+                                                    <span className="text-[10px] text-[#C4B8AC] font-outfit font-normal ml-0.5">ms</span>
                                                 </span>
-                                            ) : "—"}
+                                            ) : <span className="text-[#C4B8AC]">—</span>}
                                         </div>
 
                                         {/* Cache */}
-                                        <div style={{ paddingTop: "2px" }}>
+                                        <div className="pt-1">
                                             {trace.cache_hit === true ? (
-                                                <span style={{
-                                                    fontFamily: "'DM Mono', monospace",
-                                                    fontSize: "10px",
-                                                    color: "#22c55e",
-                                                    background: "#22c55e15",
-                                                    border: "1px solid #22c55e30",
-                                                    borderRadius: "3px",
-                                                    padding: "2px 8px",
-                                                    letterSpacing: "0.08em",
-                                                }}>HIT</span>
+                                                <span className="inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-widest bg-[#E3F0E8] text-[#3B8A52] border border-[#C0DCC8] font-outfit">
+                                                    HIT
+                                                </span>
                                             ) : trace.cache_hit === false ? (
-                                                <span style={{
-                                                    fontFamily: "'DM Mono', monospace",
-                                                    fontSize: "10px",
-                                                    color: "#f59e0b",
-                                                    background: "#f59e0b15",
-                                                    border: "1px solid #f59e0b30",
-                                                    borderRadius: "3px",
-                                                    padding: "2px 8px",
-                                                    letterSpacing: "0.08em",
-                                                }}>MISS</span>
+                                                <span className="inline-flex px-2.5 py-0.5 rounded-full text-[10px] font-semibold tracking-widest bg-[#F5EDD8] text-[#A87820] border border-[#E8D5A0] font-outfit">
+                                                    MISS
+                                                </span>
                                             ) : (
-                                                <span style={{ color: "#334155", fontFamily: "'DM Mono', monospace", fontSize: "11px" }}>—</span>
+                                                <span className="text-[#C4B8AC] text-[11px]">—</span>
                                             )}
                                         </div>
 
                                         {/* Time */}
                                         <div>
-                                            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", color: "#64748b" }}>
+                                            <div className="text-[12px] text-[#6B5E52] font-outfit">
                                                 {formatTime(trace.created_at)}
                                             </div>
-                                            <div style={{ fontFamily: "'DM Mono', monospace", fontSize: "10px", color: "#334155", marginTop: "2px" }}>
+                                            <div className="text-[10px] text-[#C4B8AC] font-outfit mt-0.5">
                                                 {formatDate(trace.created_at)}
                                             </div>
                                         </div>
                                     </div>
                                 );
                             })}
+
+                            {/* Pagination inside table frame */}
+                            {totalPages > 1 && (
+                                <div className="bg-[#EDE7DF] border-t border-[#E0D8CF] px-6 py-3 flex items-center justify-between">
+                                    <button
+                                        onClick={() => setOffset(Math.max(0, offset - LIMIT))}
+                                        disabled={offset === 0}
+                                        className="text-[11px] font-medium tracking-wide text-[#9B8E82] hover:text-[#D97B4F] transition-colors disabled:opacity-30 disabled:cursor-not-allowed font-outfit"
+                                    >
+                                        ← Prev
+                                    </button>
+                                    <span className="text-[11px] text-[#C4B8AC] tracking-widest font-outfit">
+                                        Page {currentPage} / {totalPages}
+                                    </span>
+                                    <button
+                                        onClick={() => setOffset(offset + LIMIT)}
+                                        disabled={offset + LIMIT >= total}
+                                        className="text-[11px] font-medium tracking-wide text-[#9B8E82] hover:text-[#D97B4F] transition-colors disabled:opacity-30 disabled:cursor-not-allowed font-outfit"
+                                    >
+                                        Next →
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
 
-                    {/* ── Pagination ── */}
-                    {totalPages > 1 && (
-                        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "12px", marginTop: "24px" }}>
-                            <button
-                                className="btn btn-ghost"
-                                onClick={() => setOffset(Math.max(0, offset - LIMIT))}
-                                disabled={offset === 0}
-                            >
-                                ← prev
-                            </button>
-                            <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "12px", color: "#475569" }}>
-                                page {currentPage} / {totalPages}
+                    {/* ── Source legend ── */}
+                    {!loading && !error && (
+                        <div className="mt-8 flex items-center gap-6 flex-wrap border border-[#E0D8CF] rounded-xl px-6 py-4 bg-white">
+                            <div className="flex items-center gap-2">
+                                <div className="w-3 bg-[#D97B4F]" style={{ height: "1.5px" }} />
+                                <span className="text-[10px] font-medium tracking-[0.2em] text-[#9B8E82] uppercase font-outfit">
+                                    Source Legend
+                                </span>
+                            </div>
+                            {Object.entries(SOURCE_STYLES).map(([src, style]) => (
+                                <span key={src} className="flex items-center gap-2">
+                                    <span className={`inline-flex px-2 py-0.5 rounded-full text-[9px] font-semibold tracking-wide border font-outfit ${style}`}>
+                                        {src.toUpperCase()}
+                                    </span>
+                                </span>
+                            ))}
+                            <span className="ml-auto text-[10px] text-[#C4B8AC] font-outfit tracking-wide">
+                                ⬡ Federated = query spans multiple sources
                             </span>
-                            <button
-                                className="btn btn-ghost"
-                                onClick={() => setOffset(offset + LIMIT)}
-                                disabled={offset + LIMIT >= total}
-                            >
-                                next →
-                            </button>
                         </div>
                     )}
-
-                    {/* ── Legend ── */}
-                    <div style={{
-                        marginTop: "40px",
-                        padding: "16px 20px",
-                        background: "#0a1628",
-                        border: "1px solid #1e293b",
-                        borderRadius: "8px",
-                        display: "flex",
-                        gap: "24px",
-                        flexWrap: "wrap",
-                        alignItems: "center",
-                    }}>
-                        <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "10px", color: "#475569", letterSpacing: "0.1em" }}>SOURCE LEGEND:</span>
-                        {Object.entries(SOURCE_COLORS).map(([src, color]) => (
-                            <span key={src} style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <span style={{ width: "8px", height: "8px", borderRadius: "2px", background: color, display: "inline-block" }} />
-                                <span style={{ fontFamily: "'DM Mono', monospace", fontSize: "11px", color: "#64748b" }}>{src}</span>
-                            </span>
-                        ))}
-                        <span style={{ marginLeft: "auto", fontFamily: "'DM Mono', monospace", fontSize: "10px", color: "#334155" }}>
-                            ⬡ FEDERATED = query spans multiple sources
-                        </span>
-                    </div>
-
                 </div>
+
+                {/* ── Footer ── */}
+                <div className="bg-white/50 backdrop-blur-sm px-12 py-5 fixed bottom-0 left-0 right-0 border-t border-[#E0D8CF]">
+                    <div className="flex justify-center w-full gap-8 flex-wrap">
+                        {[
+                            { key: "SentinelDB", val: "port 5433" },
+                            { key: "Neo4j", val: "port 7687" },
+                            { key: "API", val: "port 8000" },
+                            { key: "Model", val: "GROQ - llama-3.3-70b-versatile" },
+                            { key: "Developed by", val: "Partha Chakraborty, Dhvani Dave" },
+                        ].map(({ key, val }) => (
+                            <div key={key} className="flex items-center gap-2">
+                                <span className="text-[10px] tracking-widest text-[#3A3430] uppercase">{key}</span>
+                                <div className="w-px h-2.5 bg-[#3A3430]" />
+                                <span className="text-[10px] text-[#6B5E52] tracking-wide">{val}</span>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+
             </div>
         </>
     );
