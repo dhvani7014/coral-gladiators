@@ -96,8 +96,18 @@ async def investigate_stream(req: InvestigateRequest):
     async def event_generator():
         pipeline_errors = []
         target = req.request
+        plan = {}
+        sql_results = {"query_results": [], "total_rows": 0}
+        graph_results = {}
+        fraud_assessment = {}
+        graph_intelligence = {}
+        report = {}
 
-        yield sse_event("agent_start", {"agent": "Planner", "message": "Generating investigation plan..."})
+        # ── Stage 1: Planner ─────────────────────────────────────────────────
+        yield sse_event("agent_start", {
+            "agent": "Planner",
+            "message": "Querying data sources — building investigation plan..."
+        })
         await asyncio.sleep(0)
         try:
             plan = await asyncio.to_thread(plan_investigation, req.request)
@@ -110,11 +120,22 @@ async def investigate_stream(req: InvestigateRequest):
             })
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {"agent": "Planner", "error": str(e)})
-            yield sse_event("pipeline_done", {"error": "Pipeline aborted at Planner", "pipeline_errors": pipeline_errors})
+            yield sse_event("agent_error", {
+                "agent": "Planner",
+                "error": str(e),
+                "message": "Investigation planning failed. Check Groq API key and connectivity."
+            })
+            yield sse_event("pipeline_done", {
+                "error": "Pipeline aborted at Planner",
+                "pipeline_errors": pipeline_errors
+            })
             return
 
-        yield sse_event("agent_start", {"agent": "SQL", "message": "Querying Coral federated database..."})
+        # ── Stage 2: SQL ──────────────────────────────────────────────────────
+        yield sse_event("agent_start", {
+            "agent": "SQL",
+            "message": "Querying Coral federated database — transactions, emails, slack, sanctions..."
+        })
         await asyncio.sleep(0)
         try:
             sql_results = await asyncio.to_thread(execute_plan, plan)
@@ -128,10 +149,18 @@ async def investigate_stream(req: InvestigateRequest):
             })
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {"agent": "SQL", "error": str(e)})
-            sql_results = {"query_results": [], "total_rows": 0}
+            yield sse_event("agent_error", {
+                "agent": "SQL",
+                "error": str(e),
+                "message": "SQL execution failed. Coral may be unavailable — check coral CLI."
+            })
+            # Non-fatal: continue with empty results
 
-        yield sse_event("agent_start", {"agent": "Graph", "message": "Populating Neo4j knowledge graph..."})
+        # ── Stage 3: Graph ────────────────────────────────────────────────────
+        yield sse_event("agent_start", {
+            "agent": "Graph",
+            "message": "Populating Neo4j knowledge graph — building entity relationships..."
+        })
         await asyncio.sleep(0)
         try:
             graph_results = await asyncio.to_thread(populate_graph, sql_results)
@@ -142,10 +171,17 @@ async def investigate_stream(req: InvestigateRequest):
             })
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {"agent": "Graph", "error": str(e)})
-            graph_results = {}
+            yield sse_event("agent_error", {
+                "agent": "Graph",
+                "error": str(e),
+                "message": "Graph population failed. Check Neo4j is running on port 7687."
+            })
 
-        yield sse_event("agent_start", {"agent": "Fraud", "message": "Running fraud scoring rules..."})
+        # ── Stage 4: Fraud ────────────────────────────────────────────────────
+        yield sse_event("agent_start", {
+            "agent": "Fraud",
+            "message": "Running fraud scoring rules — cross-referencing sanctions list..."
+        })
         await asyncio.sleep(0)
         try:
             fraud_assessment = await asyncio.to_thread(analyze_fraud, sql_results)
@@ -159,10 +195,17 @@ async def investigate_stream(req: InvestigateRequest):
             })
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {"agent": "Fraud", "error": str(e)})
-            fraud_assessment = {}
+            yield sse_event("agent_error", {
+                "agent": "Fraud",
+                "error": str(e),
+                "message": "Fraud analysis failed. Check Neo4j connectivity and Groq API."
+            })
 
-        yield sse_event("agent_start", {"agent": "GraphIntelligence", "message": "Mapping network relationships..."})
+        # ── Stage 5: Graph Intelligence ───────────────────────────────────────
+        yield sse_event("agent_start", {
+            "agent": "GraphIntelligence",
+            "message": "Expanding entity network — mapping co-senders and sanctioned neighbors..."
+        })
         await asyncio.sleep(0)
         try:
             graph_intelligence = await asyncio.to_thread(run_graph_intelligence, target)
@@ -174,10 +217,17 @@ async def investigate_stream(req: InvestigateRequest):
             })
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {"agent": "GraphIntelligence", "error": str(e)})
-            graph_intelligence = {}
+            yield sse_event("agent_error", {
+                "agent": "GraphIntelligence",
+                "error": str(e),
+                "message": "Network analysis failed. Graph may be empty — run Graph stage first."
+            })
 
-        yield sse_event("agent_start", {"agent": "Report", "message": "Generating investigation report..."})
+        # ── Stage 6: Report ───────────────────────────────────────────────────
+        yield sse_event("agent_start", {
+            "agent": "Report",
+            "message": "Generating compliance report — synthesizing all evidence..."
+        })
         await asyncio.sleep(0)
         try:
             report = await asyncio.to_thread(
@@ -192,9 +242,13 @@ async def investigate_stream(req: InvestigateRequest):
             })
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {"agent": "Report", "error": str(e)})
-            report = {}
+            yield sse_event("agent_error", {
+                "agent": "Report",
+                "error": str(e),
+                "message": "Report generation failed. Check Groq API key and rate limits."
+            })
 
+        # ── Pipeline complete ─────────────────────────────────────────────────
         yield sse_event("pipeline_done", {
             "request": req.request,
             "target": target,
@@ -219,6 +273,169 @@ async def investigate_stream(req: InvestigateRequest):
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@app.get("/evidence/{entity_name}")
+def get_evidence_timeline(entity_name: str):
+    """
+    Returns a unified chronological timeline of all evidence involving entity_name.
+    Merges transactions, emails, slack_logs, and sanctions — sorted by timestamp ASC.
+    """
+    conn = get_db()
+    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    events = []
+
+    # 1. Transactions
+    try:
+        cur.execute("""
+            SELECT
+                transaction_id AS id,
+                sender,
+                receiver,
+                amount,
+                timestamp,
+                location,
+                risk_score,
+                flags
+            FROM transactions
+            WHERE sender ILIKE %s OR receiver ILIKE %s
+            ORDER BY timestamp ASC
+        """, (f"%{entity_name}%", f"%{entity_name}%"))
+        for row in cur.fetchall():
+            flags = row["flags"] or []
+            if isinstance(flags, str):
+                try:
+                    flags = json.loads(flags)
+                except Exception:
+                    flags = [flags] if flags else []
+            events.append({
+                "type": "transaction",
+                "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
+                "title": f"Transaction: {row['sender']} → {row['receiver']}",
+                "summary": f"${float(row['amount'] or 0):,.2f} transferred from {row['sender']} to {row['receiver']} — risk score {row['risk_score']}",
+                "detail": {
+                    "id": row["id"],
+                    "sender": row["sender"],
+                    "receiver": row["receiver"],
+                    "amount": float(row["amount"] or 0),
+                    "location": row["location"],
+                    "risk_score": int(row["risk_score"] or 0),
+                    "flags": flags,
+                }
+            })
+    except Exception as e:
+        print(f"[evidence] transaction query error: {e}")
+
+    # 2. Emails — filter to employee senders only (avoids cruise spam)
+    try:
+        cur.execute("""
+            SELECT
+                email_id AS id,
+                sender,
+                receiver,
+                subject,
+                body,
+                timestamp,
+                employee_id
+            FROM emails
+            WHERE (body ILIKE %s OR subject ILIKE %s)
+              AND employee_id LIKE 'emp_%%'
+            ORDER BY timestamp ASC
+        """, (f"%{entity_name}%", f"%{entity_name}%"))
+        for row in cur.fetchall():
+            events.append({
+                "type": "email",
+                "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
+                "title": f"Email: {row['subject']}",
+                "summary": f"From {row['sender']} to {row['receiver']}: {row['subject']}",
+                "detail": {
+                    "id": row["id"],
+                    "sender": row["sender"],
+                    "receiver": row["receiver"],
+                    "subject": row["subject"],
+                    "body": row["body"],
+                    "employee_id": row["employee_id"],
+                }
+            })
+    except Exception as e:
+        print(f"[evidence] email query error: {e}")
+
+    # 3. Slack messages — broaden to first word of entity name (matches Planner's _patch_plan logic)
+    try:
+        entity_first_word = entity_name.split()[0]
+        cur.execute("""
+            SELECT
+                message_id AS id,
+                user_id,
+                user_name,
+                channel,
+                message,
+                timestamp
+            FROM slack_logs
+            WHERE message ILIKE %s
+            ORDER BY timestamp ASC
+        """, (f"%{entity_first_word}%",))
+        for row in cur.fetchall():
+            preview = row["message"][:120] + ("..." if len(row["message"]) > 120 else "")
+            events.append({
+                "type": "slack",
+                "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
+                "title": f"Slack #{row['channel']}",
+                "summary": f"{row['user_name']}: {preview}",
+                "detail": {
+                    "id": row["id"],
+                    "user_id": row["user_id"],
+                    "user_name": row["user_name"],
+                    "channel": row["channel"],
+                    "message": row["message"],
+                }
+            })
+    except Exception as e:
+        print(f"[evidence] slack query error: {e}")
+
+    # 4. Sanctions
+    try:
+        cur.execute("""
+            SELECT
+                id,
+                entity_name,
+                country,
+                sanction_type,
+                listed_date,
+                source
+            FROM sanctions
+            WHERE entity_name ILIKE %s
+            ORDER BY listed_date ASC
+        """, (f"%{entity_name}%",))
+        for row in cur.fetchall():
+            events.append({
+                "type": "sanction",
+                "timestamp": row["listed_date"].isoformat() if row["listed_date"] else None,
+                "title": f"Sanctions Hit: {row['entity_name']}",
+                "summary": f"{row['entity_name']} listed on {row['source']} ({row['sanction_type']}) — {row['country']}",
+                "detail": {
+                    "id": row["id"],
+                    "entity_name": row["entity_name"],
+                    "country": row["country"],
+                    "sanction_type": row["sanction_type"],
+                    "listed_date": row["listed_date"].isoformat() if row["listed_date"] else None,
+                    "source": row["source"],
+                }
+            })
+    except Exception as e:
+        print(f"[evidence] sanctions query error: {e}")
+
+    cur.close()
+    conn.close()
+
+    # Sort all events chronologically — nulls go to end
+    events.sort(key=lambda x: x["timestamp"] or "9999")
+
+    return {
+        "entity": entity_name,
+        "total_events": len(events),
+        "events": events,
+    }
 
 
 @app.get("/traces")

@@ -55,8 +55,16 @@ const modules = [
     statColor: "#378add",
     live: false,
   },
+  {
+    href: "/timeline",
+    code: "07",
+    label: "Evidence Timeline",
+    desc: "Chronological reconstruction of all fraud evidence for any entity.",
+    stat: "TIMELINE",
+    statColor: "#f97316",
+    live: false,
+  },
 ];
-
 const dimmed = [
   { code: "06", label: "Dashboard", desc: "Coming soon" },
   { code: "07", label: "Timeline", desc: "Coming soon" },
