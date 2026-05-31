@@ -54,8 +54,14 @@ const modules = [
 
 const timelineSteps = [
   { text: "Pick any vendor, account, or entity ID", active: true },
-  { text: "All evidence events sorted chronologically across sources", active: false },
-  { text: "Drill into transactions, flags, and agent findings at each point", active: false },
+  {
+    text: "All evidence events sorted chronologically across sources",
+    active: false,
+  },
+  {
+    text: "Drill into transactions, flags, and agent findings at each point",
+    active: false,
+  },
 ];
 
 export default function Home() {
@@ -75,7 +81,6 @@ export default function Home() {
       `}</style>
 
       <div className="font-outfit bg-[#F7F3EE] min-h-screen text-[#1A1612]">
-
         {/* Top bar */}
         <div className="bg-[#1A1612] flex items-center justify-between px-12 h-[52px]">
           <div className="flex items-center gap-6">
@@ -94,7 +99,9 @@ export default function Home() {
                 System online
               </span>
             </div>
-            <span className="text-[11px] text-[#3A3430] tracking-wide">v0.1.0-dev</span>
+            <span className="text-[11px] text-[#3A3430] tracking-wide">
+              v0.1.0-dev
+            </span>
           </div>
         </div>
 
@@ -102,17 +109,23 @@ export default function Home() {
         <div className="px-12 pt-16 pb-14 grid grid-cols-[1fr_auto] items-end gap-10 border-b border-[#E0D8CF]">
           <div>
             <div className="flex items-center gap-2.5 mb-5">
-              <div className="w-6 h-px bg-[#D97B4F]" style={{ height: "1.5px" }} />
+              <div
+                className="w-6 h-px bg-[#D97B4F]"
+                style={{ height: "1.5px" }}
+              />
               <span className="text-[11px] font-medium tracking-[0.18em] text-[#D97B4F] uppercase">
                 AI-powered detection
               </span>
             </div>
             <h1 className="font-playfair text-[68px] font-black leading-[0.92] tracking-tight text-[#1A1612] mb-7">
-              Follow the<br />
+              Follow the
+              <br />
               <em className="text-[#8B5E3C]">money.</em>
             </h1>
             <p className="text-[15px] font-light text-[#6B5E52] leading-[1.75] max-w-[420px]">
-              A six-agent AI pipeline for real-time financial fraud investigation — built on PostgreSQL, Neo4j graph traversal, and Groq inference.
+              A six-agent AI pipeline for real-time financial fraud
+              investigation — built on PostgreSQL, Neo4j graph traversal, and
+              Groq inference.
             </p>
           </div>
           <div className="flex flex-row gap-2 items-end pb-1">
@@ -125,8 +138,12 @@ export default function Home() {
                 key={lbl}
                 className="flex items-baseline gap-2 bg-[#EDE7DF] border border-[#D8CEBF] rounded-md px-4 py-2.5 whitespace-nowrap"
               >
-                <span className="font-playfair text-[22px] font-bold text-[#1A1612]">{num}</span>
-                <span className="text-[11px] text-[#9B8E82] tracking-wide font-normal">{lbl}</span>
+                <span className="font-playfair text-[22px] font-bold text-[#1A1612]">
+                  {num}
+                </span>
+                <span className="text-[11px] text-[#9B8E82] tracking-wide font-normal">
+                  {lbl}
+                </span>
               </div>
             ))}
           </div>
@@ -144,38 +161,42 @@ export default function Home() {
           </div>
 
           <div className="grid grid-cols-3">
-            {modules.map(({ href, code, label, desc, badge, badgeStyle, live }, i) => (
-              <Link
-                key={href}
-                href={href}
-                className={`module-card flex flex-col border-b border-[#E0D8CF] p-7 bg-[#F7F3EE] hover:bg-[#F0E9E0] transition-colors duration-200 cursor-pointer
+            {modules.map(
+              ({ href, code, label, desc, badge, badgeStyle, live }, i) => (
+                <Link
+                  key={href}
+                  href={href}
+                  className={`module-card flex flex-col border-b border-[#E0D8CF] p-7 bg-[#F7F3EE] hover:bg-[#F0E9E0] transition-colors duration-200 cursor-pointer
                   ${(i + 1) % 3 !== 0 ? "border-r border-[#E0D8CF]" : ""}`}
-              >
-                <div className="flex items-center justify-between mb-[18px]">
-                  <span className="card-num text-[11px] font-medium tracking-[0.15em] text-[#C4B8AC] transition-colors duration-200">
-                    {code}
-                  </span>
-                  <span className={`text-[10px] font-medium tracking-wide px-2.5 py-[3px] rounded-full ${badgeStyle}`}>
-                    {live && (
-                      <span
-                        className="inline-block w-[5px] h-[5px] bg-[#D97B4F] rounded-full mr-[5px] animate-pulse-dot"
-                        style={{ verticalAlign: "1px" }}
-                      />
-                    )}
-                    {badge}
-                  </span>
-                </div>
-                <div className="font-playfair text-[22px] font-bold text-[#1A1612] mb-2 leading-tight">
-                  {label}
-                </div>
-                <div className="text-[13px] font-light text-[#9B8E82] leading-[1.65] flex-1">
-                  {desc}
-                </div>
-                <div className="card-arrow mt-5 text-[12px] text-[#D97B4F] font-medium tracking-wide">
-                  Open module →
-                </div>
-              </Link>
-            ))}
+                >
+                  <div className="flex items-center justify-between mb-[18px]">
+                    <span className="card-num text-[11px] font-medium tracking-[0.15em] text-[#C4B8AC] transition-colors duration-200">
+                      {code}
+                    </span>
+                    <span
+                      className={`text-[10px] font-medium tracking-wide px-2.5 py-[3px] rounded-full ${badgeStyle}`}
+                    >
+                      {live && (
+                        <span
+                          className="inline-block w-[5px] h-[5px] bg-[#D97B4F] rounded-full mr-[5px] animate-pulse-dot"
+                          style={{ verticalAlign: "1px" }}
+                        />
+                      )}
+                      {badge}
+                    </span>
+                  </div>
+                  <div className="font-playfair text-[22px] font-bold text-[#1A1612] mb-2 leading-tight">
+                    {label}
+                  </div>
+                  <div className="text-[13px] font-light text-[#9B8E82] leading-[1.65] flex-1">
+                    {desc}
+                  </div>
+                  <div className="card-arrow mt-5 text-[12px] text-[#D97B4F] font-medium tracking-wide">
+                    Open module →
+                  </div>
+                </Link>
+              ),
+            )}
 
             {/* Evidence Timeline — full-width card */}
             <div className="col-span-3 grid grid-cols-[1fr_2fr]">
@@ -195,7 +216,8 @@ export default function Home() {
                   Evidence Timeline
                 </div>
                 <div className="text-[13px] font-light text-[#9B8E82] leading-[1.65] flex-1">
-                  Chronological reconstruction of all fraud evidence for any entity.
+                  Chronological reconstruction of all fraud evidence for any
+                  entity.
                 </div>
                 <div className="card-arrow mt-5 text-[12px] text-[#D97B4F] font-medium tracking-wide">
                   Open module →
@@ -209,8 +231,9 @@ export default function Home() {
                   {timelineSteps.map(({ text, active }) => (
                     <div key={text} className="flex items-start gap-3">
                       <div
-                        className={`w-1.5 h-1.5 rounded-full mt-[5px] shrink-0 ${active ? "bg-[#D97B4F]" : "bg-[#C4B8AC]"
-                          }`}
+                        className={`w-1.5 h-1.5 rounded-full mt-[5px] shrink-0 ${
+                          active ? "bg-[#D97B4F]" : "bg-[#C4B8AC]"
+                        }`}
                       />
                       <span className="text-[13px] text-[#6B5E52] font-light leading-relaxed">
                         {text}
@@ -239,21 +262,24 @@ export default function Home() {
         <div className="bg-white/50 backdrop-blur-sm px-12 py-5 flex items-center justify-between flex-wrap gap-4 fixed bottom-0 left-0 right-0">
           <div className="flex justify-center w-full gap-8 flex-wrap">
             {[
-              { key: "SentinelDB", val: "port 5433" },
+              { key: "Coral", val: "4 sources" },
               { key: "Neo4j", val: "port 7687" },
               { key: "API", val: "port 8000" },
               { key: "Model", val: "GROQ - llama-3.3-70b-versatile" },
-              { key: "Developed by", val: "Partha Chakraborty, Dhvani Dave" }
+              { key: "Developed by", val: "Partha Chakraborty, Dhvani Dave" },
             ].map(({ key, val }) => (
               <div key={key} className="flex items-center gap-2">
-                <span className="text-[10px] tracking-widest text-[#3A3430] uppercase">{key}</span>
+                <span className="text-[10px] tracking-widest text-[#3A3430] uppercase">
+                  {key}
+                </span>
                 <div className="w-px h-2.5 bg-[#3A3430]" />
-                <span className="text-[10px] text-[#6B5E52] tracking-wide">{val}</span>
+                <span className="text-[10px] text-[#6B5E52] tracking-wide">
+                  {val}
+                </span>
               </div>
             ))}
           </div>
         </div>
-
       </div>
     </>
   );

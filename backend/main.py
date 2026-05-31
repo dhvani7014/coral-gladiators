@@ -1,22 +1,29 @@
-import json
 import asyncio
-from fastapi import FastAPI, HTTPException
+import json
+import os
+from pathlib import Path
+
+from dotenv import load_dotenv
+from fastapi import FastAPI, Header, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-import psycopg2
-import psycopg2.extras
-import os
 
-from dotenv import load_dotenv
 load_dotenv()
 
-from agents.planner import plan_investigation
-from agents.sql_agent import execute_plan
-from agents.graph_agent import populate_graph
 from agents.fraud_agent import analyze_fraud
+from agents.graph_agent import populate_graph
 from agents.graph_intelligence_agent import run_graph_intelligence
+from agents.planner import plan_investigation
 from agents.report_agent import generate_report
+from agents.sql_agent import execute_plan
+from utils.sync_sanctions import sync_sanctions
+from utils.webhook_parsers import (
+    EmailWebhookPayload,
+    SlackWebhookPayload,
+    parse_email_to_row,
+    parse_slack_to_row,
+)
 
 app = FastAPI(title="SentinelAI")
 
@@ -37,27 +44,105 @@ class QueryRequest(BaseModel):
     sql: str
 
 
-def get_db():
-    return psycopg2.connect(os.getenv("DATABASE_URL", "postgresql://sentinel:sentinel123@localhost:5433/sentineldb"))
-
-
 def sse_event(event: str, data: dict) -> str:
     return f"event: {event}\ndata: {json.dumps(data)}\n\n"
 
 
+CORAL_DATA_DIR = Path(__file__).parent.parent / "coral" / "data"
+
+
+def append_jsonl(filename: str, row: dict):
+    """Append a single JSON row to a .jsonl file in coral/data/."""
+    path = CORAL_DATA_DIR / filename
+    with open(path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(row) + "\n")
+
+
 # ── routes ───────────────────────────────────────────────────────────────────
+
 
 @app.get("/health")
 def health():
     return {"status": "ok"}
 
 
+# In-process cache: Slack user_id -> display_name (avoids re-fetching on every message)
+_slack_user_cache: dict[str, str] = {}
+
+
+async def _resolve_slack_username(user_id: str) -> str:
+    """Look up a Slack user's display name via the Web API using SLACK_BOT_TOKEN."""
+    if not user_id or user_id == "unknown":
+        return user_id
+    if user_id in _slack_user_cache:
+        return _slack_user_cache[user_id]
+    token = os.getenv("SLACK_BOT_TOKEN")
+    if not token:
+        return user_id  # no token configured, fall back to ID
+    try:
+        import httpx
+
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(
+                "https://slack.com/api/users.info",
+                params={"user": user_id},
+                headers={"Authorization": f"Bearer {token}"},
+                timeout=5,
+            )
+            data = resp.json()
+            if data.get("ok"):
+                profile = data["user"]["profile"]
+                name = (
+                    profile.get("display_name") or profile.get("real_name") or user_id
+                )
+                _slack_user_cache[user_id] = name
+                return name
+    except Exception:
+        pass
+    return user_id
+
+
+@app.post("/webhooks/slack")
+async def webhook_slack(payload: SlackWebhookPayload):
+    # Slack URL verification handshake
+    if payload.type == "url_verification":
+        return {"challenge": payload.challenge}
+    # Only process message events
+    if (
+        payload.type == "event_callback"
+        and payload.event
+        and payload.event.type == "message"
+    ):
+        row = parse_slack_to_row(payload)
+        # Resolve real display name from Slack API
+        row["user_name"] = await _resolve_slack_username(row["user_id"])
+        append_jsonl("slack_logs.jsonl", row)
+        return {"status": "ok", "message_id": row["message_id"]}
+    return {"status": "ignored", "type": payload.type}
+
+
+@app.post("/webhooks/email")
+async def webhook_email(payload: EmailWebhookPayload):
+    row = parse_email_to_row(payload)
+    append_jsonl("emails.jsonl", row)
+    return {"status": "ok", "email_id": row["email_id"]}
+
+
+@app.post("/admin/sync-sanctions")
+async def admin_sync_sanctions(x_admin_key: str = Header(None)):
+    ADMIN_KEY = os.getenv("ADMIN_KEY", "sentinel-admin")
+    if x_admin_key != ADMIN_KEY:
+        raise HTTPException(status_code=403, detail="Invalid admin key")
+    result = await asyncio.to_thread(sync_sanctions)
+    return result
+
+
 @app.post("/query")
 def query(req: QueryRequest):
     import subprocess
+
     result = subprocess.run(
-        ["coral", "sql", "--format", "json", req.sql],
-        capture_output=True, text=True
+        ["coral", "sql", "--format", "json", req.sql], capture_output=True, text=True
     )
     try:
         return json.loads(result.stdout)
@@ -104,166 +189,236 @@ async def investigate_stream(req: InvestigateRequest):
         report = {}
 
         # ── Stage 1: Planner ─────────────────────────────────────────────────
-        yield sse_event("agent_start", {
-            "agent": "Planner",
-            "message": "Querying data sources — building investigation plan..."
-        })
+        yield sse_event(
+            "agent_start",
+            {
+                "agent": "Planner",
+                "message": "Querying data sources — building investigation plan...",
+            },
+        )
         await asyncio.sleep(0)
         try:
             plan = await asyncio.to_thread(plan_investigation, req.request)
             target = plan["target"]
-            yield sse_event("agent_done", {
-                "agent": "Planner",
-                "target": target,
-                "query_count": len(plan.get("queries", [])),
-                "summary": plan.get("summary", ""),
-            })
+            yield sse_event(
+                "agent_done",
+                {
+                    "agent": "Planner",
+                    "target": target,
+                    "query_count": len(plan.get("queries", [])),
+                    "summary": plan.get("summary", ""),
+                },
+            )
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {
-                "agent": "Planner",
-                "error": str(e),
-                "message": "Investigation planning failed. Check Groq API key and connectivity."
-            })
-            yield sse_event("pipeline_done", {
-                "error": "Pipeline aborted at Planner",
-                "pipeline_errors": pipeline_errors
-            })
+            yield sse_event(
+                "agent_error",
+                {
+                    "agent": "Planner",
+                    "error": str(e),
+                    "message": "Investigation planning failed. Check Groq API key and connectivity.",
+                },
+            )
+            yield sse_event(
+                "pipeline_done",
+                {
+                    "error": "Pipeline aborted at Planner",
+                    "pipeline_errors": pipeline_errors,
+                },
+            )
             return
 
         # ── Stage 2: SQL ──────────────────────────────────────────────────────
-        yield sse_event("agent_start", {
-            "agent": "SQL",
-            "message": "Querying Coral federated database — transactions, emails, slack, sanctions..."
-        })
+        yield sse_event(
+            "agent_start",
+            {
+                "agent": "SQL",
+                "message": "Querying Coral — sanctions watchlist, emails, Slack intelligence...",
+            },
+        )
         await asyncio.sleep(0)
         try:
             sql_results = await asyncio.to_thread(execute_plan, plan)
-            yield sse_event("agent_done", {
-                "agent": "SQL",
-                "total_rows": sql_results.get("total_rows", 0),
-                "queries": [
-                    {"name": q["name"], "count": q["count"], "success": q["success"]}
-                    for q in sql_results.get("query_results", [])
-                ],
-            })
+            yield sse_event(
+                "agent_done",
+                {
+                    "agent": "SQL",
+                    "total_rows": sql_results.get("total_rows", 0),
+                    "queries": [
+                        {
+                            "name": q["name"],
+                            "count": q["count"],
+                            "success": q["success"],
+                        }
+                        for q in sql_results.get("query_results", [])
+                    ],
+                },
+            )
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {
-                "agent": "SQL",
-                "error": str(e),
-                "message": "SQL execution failed. Coral may be unavailable — check coral CLI."
-            })
+            yield sse_event(
+                "agent_error",
+                {
+                    "agent": "SQL",
+                    "error": str(e),
+                    "message": "SQL execution failed. Coral may be unavailable — check coral CLI.",
+                },
+            )
             # Non-fatal: continue with empty results
 
         # ── Stage 3: Graph ────────────────────────────────────────────────────
-        yield sse_event("agent_start", {
-            "agent": "Graph",
-            "message": "Populating Neo4j knowledge graph — building entity relationships..."
-        })
+        yield sse_event(
+            "agent_start",
+            {
+                "agent": "Graph",
+                "message": "Populating Neo4j knowledge graph — building entity relationships...",
+            },
+        )
         await asyncio.sleep(0)
         try:
             graph_results = await asyncio.to_thread(populate_graph, sql_results)
-            yield sse_event("agent_done", {
-                "agent": "Graph",
-                "nodes": graph_results.get("nodes", {}),
-                "relationships": graph_results.get("relationships", {}),
-            })
+            yield sse_event(
+                "agent_done",
+                {
+                    "agent": "Graph",
+                    "nodes": graph_results.get("nodes", {}),
+                    "relationships": graph_results.get("relationships", {}),
+                },
+            )
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {
-                "agent": "Graph",
-                "error": str(e),
-                "message": "Graph population failed. Check Neo4j is running on port 7687."
-            })
+            yield sse_event(
+                "agent_error",
+                {
+                    "agent": "Graph",
+                    "error": str(e),
+                    "message": "Graph population failed. Check Neo4j is running on port 7687.",
+                },
+            )
 
         # ── Stage 4: Fraud ────────────────────────────────────────────────────
-        yield sse_event("agent_start", {
-            "agent": "Fraud",
-            "message": "Running fraud scoring rules — cross-referencing sanctions list..."
-        })
+        yield sse_event(
+            "agent_start",
+            {
+                "agent": "Fraud",
+                "message": "Running fraud scoring rules — cross-referencing sanctions list...",
+            },
+        )
         await asyncio.sleep(0)
         try:
             fraud_assessment = await asyncio.to_thread(analyze_fraud, sql_results)
             assessment = fraud_assessment.get("assessment", {})
-            yield sse_event("agent_done", {
-                "agent": "Fraud",
-                "rule_score": fraud_assessment.get("rule_score", 0),
-                "llm_score": assessment.get("score", 0),
-                "risk_level": assessment.get("risk_level", "UNKNOWN"),
-                "rule_findings": fraud_assessment.get("rule_findings", []),
-            })
+            yield sse_event(
+                "agent_done",
+                {
+                    "agent": "Fraud",
+                    "rule_score": fraud_assessment.get("rule_score", 0),
+                    "llm_score": assessment.get("score", 0),
+                    "risk_level": assessment.get("risk_level", "UNKNOWN"),
+                    "rule_findings": fraud_assessment.get("rule_findings", []),
+                },
+            )
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {
-                "agent": "Fraud",
-                "error": str(e),
-                "message": "Fraud analysis failed. Check Neo4j connectivity and Groq API."
-            })
+            yield sse_event(
+                "agent_error",
+                {
+                    "agent": "Fraud",
+                    "error": str(e),
+                    "message": "Fraud analysis failed. Check Neo4j connectivity and Groq API.",
+                },
+            )
 
         # ── Stage 5: Graph Intelligence ───────────────────────────────────────
-        yield sse_event("agent_start", {
-            "agent": "GraphIntelligence",
-            "message": "Expanding entity network — mapping co-senders and sanctioned neighbors..."
-        })
+        yield sse_event(
+            "agent_start",
+            {
+                "agent": "GraphIntelligence",
+                "message": "Expanding entity network — mapping co-senders and sanctioned neighbors...",
+            },
+        )
         await asyncio.sleep(0)
         try:
             graph_intelligence = await asyncio.to_thread(run_graph_intelligence, target)
-            yield sse_event("agent_done", {
-                "agent": "GraphIntelligence",
-                "findings": graph_intelligence.get("findings", []),
-                "network_size": graph_intelligence.get("network_size", 0),
-                "sanctioned_neighbors": graph_intelligence.get("sanctioned_neighbors", []),
-            })
+            yield sse_event(
+                "agent_done",
+                {
+                    "agent": "GraphIntelligence",
+                    "findings": graph_intelligence.get("findings", []),
+                    "network_size": graph_intelligence.get("network_size", 0),
+                    "sanctioned_neighbors": graph_intelligence.get(
+                        "sanctioned_neighbors", []
+                    ),
+                },
+            )
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {
-                "agent": "GraphIntelligence",
-                "error": str(e),
-                "message": "Network analysis failed. Graph may be empty — run Graph stage first."
-            })
+            yield sse_event(
+                "agent_error",
+                {
+                    "agent": "GraphIntelligence",
+                    "error": str(e),
+                    "message": "Network analysis failed. Graph may be empty — run Graph stage first.",
+                },
+            )
 
         # ── Stage 6: Report ───────────────────────────────────────────────────
-        yield sse_event("agent_start", {
-            "agent": "Report",
-            "message": "Generating compliance report — synthesizing all evidence..."
-        })
+        yield sse_event(
+            "agent_start",
+            {
+                "agent": "Report",
+                "message": "Generating compliance report — synthesizing all evidence...",
+            },
+        )
         await asyncio.sleep(0)
         try:
             report = await asyncio.to_thread(
-                generate_report, target, sql_results, fraud_assessment, graph_intelligence
+                generate_report,
+                target,
+                sql_results,
+                fraud_assessment,
+                graph_intelligence,
             )
-            yield sse_event("agent_done", {
-                "agent": "Report",
-                "risk_score": report.get("risk_score", 0),
-                "risk_level": report.get("risk_level", "UNKNOWN"),
-                "recommended_action": report.get("recommended_action", ""),
-                "executive_summary": report.get("executive_summary", ""),
-            })
+            yield sse_event(
+                "agent_done",
+                {
+                    "agent": "Report",
+                    "risk_score": report.get("risk_score", 0),
+                    "risk_level": report.get("risk_level", "UNKNOWN"),
+                    "recommended_action": report.get("recommended_action", ""),
+                    "executive_summary": report.get("executive_summary", ""),
+                },
+            )
         except Exception as e:
             pipeline_errors.append(str(e))
-            yield sse_event("agent_error", {
-                "agent": "Report",
-                "error": str(e),
-                "message": "Report generation failed. Check Groq API key and rate limits."
-            })
+            yield sse_event(
+                "agent_error",
+                {
+                    "agent": "Report",
+                    "error": str(e),
+                    "message": "Report generation failed. Check Groq API key and rate limits.",
+                },
+            )
 
         # ── Pipeline complete ─────────────────────────────────────────────────
-        yield sse_event("pipeline_done", {
-            "request": req.request,
-            "target": target,
-            "pipeline_errors": pipeline_errors,
-            "plan": plan,
-            "sql_results": sql_results,
-            "graph_results": graph_results,
-            "fraud_assessment": fraud_assessment,
-            "graph_intelligence": graph_intelligence,
-            "report": report,
-            "risk_score": report.get("risk_score", 0),
-            "risk_level": report.get("risk_level", "UNKNOWN"),
-            "recommendation": report.get("recommended_action", ""),
-            "summary": report.get("executive_summary", ""),
-        })
+        yield sse_event(
+            "pipeline_done",
+            {
+                "request": req.request,
+                "target": target,
+                "pipeline_errors": pipeline_errors,
+                "plan": plan,
+                "sql_results": sql_results,
+                "graph_results": graph_results,
+                "fraud_assessment": fraud_assessment,
+                "graph_intelligence": graph_intelligence,
+                "report": report,
+                "risk_score": report.get("risk_score", 0),
+                "risk_level": report.get("risk_level", "UNKNOWN"),
+                "recommendation": report.get("recommended_action", ""),
+                "summary": report.get("executive_summary", ""),
+            },
+        )
 
     return StreamingResponse(
         event_generator(),
@@ -275,341 +430,222 @@ async def investigate_stream(req: InvestigateRequest):
     )
 
 
-@app.get("/evidence/{entity_name}")
-def get_evidence_timeline(entity_name: str):
-    """
-    Returns a unified chronological timeline of all evidence involving entity_name.
-    Merges transactions, emails, slack_logs, and sanctions — sorted by timestamp ASC.
-    """
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    events = []
-
-    # 1. Transactions
-    try:
-        cur.execute("""
-            SELECT
-                transaction_id AS id,
-                sender,
-                receiver,
-                amount,
-                timestamp,
-                location,
-                risk_score,
-                flags
-            FROM transactions
-            WHERE sender ILIKE %s OR receiver ILIKE %s
-            ORDER BY timestamp ASC
-        """, (f"%{entity_name}%", f"%{entity_name}%"))
-        for row in cur.fetchall():
-            flags = row["flags"] or []
-            if isinstance(flags, str):
-                try:
-                    flags = json.loads(flags)
-                except Exception:
-                    flags = [flags] if flags else []
-            events.append({
-                "type": "transaction",
-                "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
-                "title": f"Transaction: {row['sender']} → {row['receiver']}",
-                "summary": f"${float(row['amount'] or 0):,.2f} transferred from {row['sender']} to {row['receiver']} — risk score {row['risk_score']}",
-                "detail": {
-                    "id": row["id"],
-                    "sender": row["sender"],
-                    "receiver": row["receiver"],
-                    "amount": float(row["amount"] or 0),
-                    "location": row["location"],
-                    "risk_score": int(row["risk_score"] or 0),
-                    "flags": flags,
-                }
-            })
-    except Exception as e:
-        print(f"[evidence] transaction query error: {e}")
-
-    # 2. Emails — filter to employee senders only (avoids cruise spam)
-    try:
-        cur.execute("""
-            SELECT
-                email_id AS id,
-                sender,
-                receiver,
-                subject,
-                body,
-                timestamp,
-                employee_id
-            FROM emails
-            WHERE (body ILIKE %s OR subject ILIKE %s)
-              AND employee_id LIKE 'emp_%%'
-            ORDER BY timestamp ASC
-        """, (f"%{entity_name}%", f"%{entity_name}%"))
-        for row in cur.fetchall():
-            events.append({
-                "type": "email",
-                "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
-                "title": f"Email: {row['subject']}",
-                "summary": f"From {row['sender']} to {row['receiver']}: {row['subject']}",
-                "detail": {
-                    "id": row["id"],
-                    "sender": row["sender"],
-                    "receiver": row["receiver"],
-                    "subject": row["subject"],
-                    "body": row["body"],
-                    "employee_id": row["employee_id"],
-                }
-            })
-    except Exception as e:
-        print(f"[evidence] email query error: {e}")
-
-    # 3. Slack messages — broaden to first word of entity name (matches Planner's _patch_plan logic)
-    try:
-        entity_first_word = entity_name.split()[0]
-        cur.execute("""
-            SELECT
-                message_id AS id,
-                user_id,
-                user_name,
-                channel,
-                message,
-                timestamp
-            FROM slack_logs
-            WHERE message ILIKE %s
-            ORDER BY timestamp ASC
-        """, (f"%{entity_first_word}%",))
-        for row in cur.fetchall():
-            preview = row["message"][:120] + ("..." if len(row["message"]) > 120 else "")
-            events.append({
-                "type": "slack",
-                "timestamp": row["timestamp"].isoformat() if row["timestamp"] else None,
-                "title": f"Slack #{row['channel']}",
-                "summary": f"{row['user_name']}: {preview}",
-                "detail": {
-                    "id": row["id"],
-                    "user_id": row["user_id"],
-                    "user_name": row["user_name"],
-                    "channel": row["channel"],
-                    "message": row["message"],
-                }
-            })
-    except Exception as e:
-        print(f"[evidence] slack query error: {e}")
-
-    # 4. Sanctions
-    try:
-        cur.execute("""
-            SELECT
-                id,
-                entity_name,
-                country,
-                sanction_type,
-                listed_date,
-                source
-            FROM sanctions
-            WHERE entity_name ILIKE %s
-            ORDER BY listed_date ASC
-        """, (f"%{entity_name}%",))
-        for row in cur.fetchall():
-            events.append({
-                "type": "sanction",
-                "timestamp": row["listed_date"].isoformat() if row["listed_date"] else None,
-                "title": f"Sanctions Hit: {row['entity_name']}",
-                "summary": f"{row['entity_name']} listed on {row['source']} ({row['sanction_type']}) — {row['country']}",
-                "detail": {
-                    "id": row["id"],
-                    "entity_name": row["entity_name"],
-                    "country": row["country"],
-                    "sanction_type": row["sanction_type"],
-                    "listed_date": row["listed_date"].isoformat() if row["listed_date"] else None,
-                    "source": row["source"],
-                }
-            })
-    except Exception as e:
-        print(f"[evidence] sanctions query error: {e}")
-
-    cur.close()
-    conn.close()
-
-    # Sort all events chronologically — nulls go to end
-    events.sort(key=lambda x: x["timestamp"] or "9999")
-
-    return {
-        "entity": entity_name,
-        "total_events": len(events),
-        "events": events,
-    }
-
-
-@app.get("/traces")
-async def get_traces(limit: int = 50, offset: int = 0):
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("SELECT COUNT(*) FROM coral_traces")
-        total = cur.fetchone()[0]
-        cur.execute("""
-            SELECT id, query_text, sources_hit, execution_ms, cache_hit, timestamp
-            FROM coral_traces
-            ORDER BY timestamp DESC
-            LIMIT %s OFFSET %s
-        """, (limit, offset))
-        rows = cur.fetchall()
-        cur.close()
-        conn.close()
-
-        traces = []
-        for row in rows:
-            trace_id, query_text, sources_hit, execution_ms, cache_hit, timestamp = row
-            traces.append({
-                "id": trace_id,
-                "query_text": query_text,
-                "sources_hit": sources_hit,
-                "execution_ms": execution_ms,
-                "cache_hit": cache_hit,
-                "created_at": timestamp.isoformat() if timestamp else None,
-            })
-        return {"traces": traces, "total": total, "limit": limit, "offset": offset}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to fetch traces: {str(e)}")
-
-
-@app.delete("/traces")
-async def clear_traces():
-    try:
-        conn = get_db()
-        cur = conn.cursor()
-        cur.execute("DELETE FROM coral_traces")
-        conn.commit()
-        deleted = cur.rowcount
-        cur.close()
-        conn.close()
-        return {"deleted": deleted}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-@app.get("/transactions/flagged")
-def get_flagged_transactions():
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
-    cur.execute("""
-        SELECT transaction_id, sender, receiver, amount, timestamp,
-               location, risk_score, flags
-        FROM transactions
-        WHERE risk_score >= 40
-        ORDER BY risk_score DESC, timestamp DESC
-        LIMIT 50
-    """)
-    rows = cur.fetchall()
-    cur.close()
-    conn.close()
-
-    transactions = []
-    for row in rows:
-        r = dict(row)
-        flags = r.get("flags", [])
-        if isinstance(flags, str):
-            try:
-                flags = json.loads(flags)
-            except Exception:
-                flags = [flags] if flags else []
-        r["flags"]      = flags
-        r["amount"]     = float(r["amount"] or 0)
-        r["risk_score"] = int(r["risk_score"] or 0)
-        r["timestamp"]  = str(r["timestamp"] or "")
-        transactions.append(r)
-
-    return {"transactions": transactions, "total": len(transactions)}
+# ── Coral-backed read routes ──────────────────────────────────────────────────
 
 
 @app.get("/stats")
 def get_stats():
-    conn = get_db()
-    cur = conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+    """Dashboard stats from all 3 live Coral sources."""
+    # Sanctions counts
+    sanction_rows = _coral_query("SELECT COUNT(*) as total FROM sanctions.sanctions")
+    total_sanctions = int((sanction_rows[0].get("total") or 0) if sanction_rows else 0)
 
-    # Transaction stats
-    cur.execute("""
-        SELECT
-            COUNT(*)                                                 AS total,
-            COUNT(*) FILTER (WHERE risk_score >= 40)                AS flagged,
-            COUNT(*) FILTER (WHERE risk_score >= 70)                AS critical,
-            COUNT(*) FILTER (WHERE risk_score >= 40
-                               AND risk_score < 70)                 AS high,
-            COALESCE(SUM(amount) FILTER (WHERE risk_score >= 40), 0) AS total_exposure
-        FROM transactions
-    """)
-    tx = dict(cur.fetchone())
-
-    # Top vendors by risk
-    cur.execute("""
-        SELECT
-            receiver            AS name,
-            COUNT(*)            AS tx_count,
-            MAX(risk_score)     AS max_risk,
-            SUM(amount)         AS total_amount
-        FROM transactions
-        WHERE risk_score >= 40
-        GROUP BY receiver
-        ORDER BY max_risk DESC, tx_count DESC
+    # Sanctions by country top 5
+    top_countries = _coral_query("""
+        SELECT country, COUNT(*) as count
+        FROM sanctions.sanctions
+        WHERE country IS NOT NULL
+        GROUP BY country
+        ORDER BY count DESC
         LIMIT 5
     """)
-    top_vendors = [dict(r) for r in cur.fetchall()]
 
-    # Recent flagged transactions
-    cur.execute("""
-        SELECT transaction_id, sender, receiver, amount, risk_score, flags, timestamp
-        FROM transactions
-        WHERE risk_score >= 40
+    # Slack counts
+    slack_rows = _coral_query("SELECT COUNT(*) as total FROM slack.slack_logs")
+    total_slack = int((slack_rows[0].get("total") or 0) if slack_rows else 0)
+
+    # Recent slack messages
+    recent_slack = _coral_query("""
+        SELECT user_name, channel, message, timestamp
+        FROM slack.slack_logs
         ORDER BY timestamp DESC
         LIMIT 6
     """)
-    recent = []
-    for row in cur.fetchall():
-        r = dict(row)
-        flags = r.get("flags", [])
-        if isinstance(flags, str):
-            try:
-                flags = json.loads(flags)
-            except Exception:
-                flags = [flags] if flags else []
-        r["flags"]      = flags
-        r["amount"]     = float(r["amount"] or 0)
-        r["risk_score"] = int(r["risk_score"] or 0)
-        r["timestamp"]  = str(r["timestamp"] or "")
-        recent.append(r)
 
-    # Trace stats
-    cur.execute("""
-        SELECT
-            COUNT(*)                                          AS total_queries,
-            COALESCE(AVG(execution_ms), 0)                   AS avg_latency_ms,
-            COUNT(*) FILTER (WHERE cache_hit = true)         AS cache_hits
-        FROM coral_traces
-    """)
-    traces = dict(cur.fetchone())
-
-    cur.close()
-    conn.close()
+    # Email counts
+    email_rows = _coral_query("SELECT COUNT(*) as total FROM emails.emails")
+    total_emails = int((email_rows[0].get("total") or 0) if email_rows else 0)
 
     return {
-        "transactions": {
-            "total":          int(tx["total"]),
-            "flagged":        int(tx["flagged"]),
-            "critical":       int(tx["critical"]),
-            "high":           int(tx["high"]),
-            "total_exposure": float(tx["total_exposure"]),
+        "sanctions": {
+            "total": total_sanctions,
+            "top_countries": [
+                {"name": r.get("country", ""), "count": int(r.get("count") or 0)}
+                for r in top_countries
+            ],
         },
-        "traces": {
-            "total_queries":  int(traces["total_queries"]),
-            "avg_latency_ms": round(float(traces["avg_latency_ms"]), 1),
-            "cache_hits":     int(traces["cache_hits"]),
+        "slack": {
+            "total": total_slack,
+            "recent": [
+                {
+                    "user_name": r.get("user_name", ""),
+                    "channel": r.get("channel", ""),
+                    "message": r.get("message", ""),
+                    "timestamp": str(r.get("timestamp") or ""),
+                }
+                for r in recent_slack
+            ],
         },
-        "top_vendors": [
-            {
-                "name":         r["name"],
-                "tx_count":     int(r["tx_count"]),
-                "max_risk":     int(r["max_risk"]),
-                "total_amount": float(r["total_amount"]),
-            }
-            for r in top_vendors
-        ],
-        "recent_flagged": recent,
+        "emails": {
+            "total": total_emails,
+        },
+        "sources": 3,
     }
+
+
+def _coral_query(sql: str) -> list[dict]:
+    """Run a Coral SQL query and return rows as a list of dicts."""
+    import subprocess
+
+    result = subprocess.run(
+        ["coral", "sql", "--format", "json", sql],
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    rows = []
+    for line in result.stdout.strip().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            parsed = json.loads(line)
+            if isinstance(parsed, list):
+                rows.extend(parsed)
+            else:
+                rows.append(parsed)
+        except json.JSONDecodeError:
+            continue
+    return rows
+
+
+@app.get("/evidence/{entity_name}")
+def get_evidence_timeline(entity_name: str):
+    """Build a cross-source evidence timeline for an entity using Coral federated queries."""
+    events = []
+
+    # Sanctions check
+    sanction_rows = _coral_query(f"""
+        SELECT entity_name, country, sanction_type, listed_date, source
+        FROM sanctions.sanctions
+        WHERE entity_name = '{entity_name}'
+        LIMIT 10
+    """)
+    for r in sanction_rows:
+        events.append(
+            {
+                "type": "sanction",
+                "timestamp": str(r.get("listed_date") or ""),
+                "title": f"Sanctions hit: {r.get('sanction_type', '')}",
+                "detail": f"Source: {r.get('source', '')}  Country: {r.get('country', '')}",
+                "risk_score": 100,
+                "flags": ["SANCTIONED"],
+                "raw": r,
+            }
+        )
+
+    # Emails mentioning entity
+    safe = entity_name.replace("'", "''")
+    email_rows = _coral_query(f"""
+        SELECT email_id, sender, receiver, subject, timestamp
+        FROM emails.emails
+        WHERE sender LIKE '%{safe}%' OR receiver LIKE '%{safe}%' OR subject LIKE '%{safe}%'
+        ORDER BY timestamp ASC
+        LIMIT 50
+    """)
+    for r in email_rows:
+        events.append(
+            {
+                "type": "email",
+                "timestamp": str(r.get("timestamp") or ""),
+                "title": r.get("subject") or "(no subject)",
+                "detail": f"{r.get('sender', '')} → {r.get('receiver', '')}",
+                "risk_score": 0,
+                "flags": [],
+                "raw": r,
+            }
+        )
+
+    # Slack messages mentioning entity
+    keyword = entity_name.split()[0].replace("'", "''")
+    slack_rows = _coral_query(f"""
+        SELECT message_id, user_name, channel, message, timestamp
+        FROM slack.slack_logs
+        WHERE message LIKE '%{keyword}%' OR user_name LIKE '%{safe}%'
+        ORDER BY timestamp ASC
+        LIMIT 50
+    """)
+    for r in slack_rows:
+        events.append(
+            {
+                "type": "slack",
+                "timestamp": str(r.get("timestamp") or ""),
+                "title": f"#{r.get('channel', '')} — {r.get('user_name', '')}",
+                "detail": r.get("message", ""),
+                "risk_score": 0,
+                "flags": [],
+                "raw": r,
+            }
+        )
+
+    events.sort(key=lambda e: e["timestamp"])
+    return {"entity": entity_name, "events": events, "total": len(events)}
+
+
+@app.get("/traces")
+def get_traces(limit: int = 20, offset: int = 0):
+    """Audit trace log — no persistent store in current architecture."""
+    return {"traces": [], "total": 0}
+
+
+@app.get("/feed/sanctions")
+def feed_sanctions(limit: int = 50):
+    """Return recently added sanctioned entities for the live feed."""
+    rows = _coral_query(f"""
+        SELECT entity_name, country, sanction_type, listed_date, source
+        FROM sanctions.sanctions
+        WHERE entity_name IS NOT NULL
+        ORDER BY listed_date DESC
+        LIMIT {limit}
+    """)
+    items = []
+    for r in rows:
+        items.append(
+            {
+                "entity_name": r.get("entity_name", ""),
+                "country": r.get("country", "") or "Unknown",
+                "sanction_type": r.get("sanction_type", "") or "Unknown",
+                "listed_date": str(r.get("listed_date") or ""),
+                "source": r.get("source", "") or "OpenSanctions",
+            }
+        )
+    return {"items": items, "total": len(items)}
+
+
+@app.get("/feed/slack")
+def feed_slack(limit: int = 50):
+    """Return recent Slack messages for the live intelligence feed."""
+    rows = _coral_query(f"""
+        SELECT message_id, user_name, channel, message, timestamp
+        FROM slack.slack_logs
+        ORDER BY timestamp DESC
+        LIMIT {limit}
+    """)
+    items = []
+    for r in rows:
+        items.append(
+            {
+                "message_id": r.get("message_id", ""),
+                "user_name": r.get("user_name", "unknown"),
+                "channel": r.get("channel", ""),
+                "message": r.get("message", ""),
+                "timestamp": str(r.get("timestamp") or ""),
+            }
+        )
+    return {"items": items, "total": len(items)}
+
+
+@app.delete("/traces")
+def clear_traces():
+    """No-op: traces are not persisted in the new architecture."""
+    return {"status": "ok", "deleted": 0}
