@@ -1,0 +1,29 @@
+name: emails
+version: 0.1.0
+dsl_version: 3
+backend: jsonl
+
+test_queries:
+  - SELECT * FROM emails.emails LIMIT 1
+
+tables:
+  - name: emails
+    description: Employee email communications
+    source:
+      location: file:///Users/parthachakraborty/Developer/NEW/coral/coral-gladiators/coral/data/
+      glob: "emails.jsonl"
+    columns:
+      - name: email_id
+        type: Utf8
+      - name: sender
+        type: Utf8
+      - name: receiver
+        type: Utf8
+      - name: subject
+        type: Utf8
+      - name: body
+        type: Utf8
+      - name: timestamp
+        type: Utf8
+      - name: employee_id
+        type: Utf8

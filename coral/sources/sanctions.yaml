@@ -1,0 +1,27 @@
+name: sanctions
+version: 0.1.0
+dsl_version: 3
+backend: jsonl
+
+test_queries:
+  - SELECT * FROM sanctions.sanctions LIMIT 1
+
+tables:
+  - name: sanctions
+    description: Sanctioned entities list
+    source:
+      location: file:///Users/parthachakraborty/Developer/NEW/coral/coral-gladiators/coral/data/
+      glob: "sanctions.jsonl"
+    columns:
+      - name: id
+        type: Int64
+      - name: entity_name
+        type: Utf8
+      - name: country
+        type: Utf8
+      - name: sanction_type
+        type: Utf8
+      - name: listed_date
+        type: Utf8
+      - name: source
+        type: Utf8

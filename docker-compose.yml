@@ -1,17 +1,6 @@
 version: "3.9"
 
 services:
-  postgres:
-    image: postgres:15
-    environment:
-      POSTGRES_USER: sentinel
-      POSTGRES_PASSWORD: sentinel123
-      POSTGRES_DB: sentineldb
-    ports:
-      - "5434:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-
   neo4j:
     image: neo4j:5
     environment:
@@ -30,5 +19,4 @@ services:
       - neo4j_data:/data
 
 volumes:
-  postgres_data:
   neo4j_data:

@@ -465,7 +465,7 @@ export default function TimelinePage() {
                 <div className="bg-white/50 backdrop-blur-sm px-12 py-5 fixed bottom-0 left-0 right-0 border-t border-[#E0D8CF]">
                     <div className="flex justify-center w-full gap-8 flex-wrap">
                         {[
-                            { key: "SentinelDB", val: "port 5433" },
+                            { key: "Coral", val: "4 sources" }
                             { key: "Neo4j", val: "port 7687" },
                             { key: "API", val: "port 8000" },
                             { key: "Model", val: "GROQ - llama-3.3-70b-versatile" },

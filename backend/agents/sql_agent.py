@@ -1,12 +1,9 @@
-import subprocess
 import json
-import psycopg
-import os
+import subprocess
+
 from dotenv import load_dotenv
 
 load_dotenv()
-
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://sentinel:sentinel123@localhost:5434/sentineldb")
 
 
 def run_query(sql: str) -> dict:
@@ -20,7 +17,12 @@ def run_query(sql: str) -> dict:
         )
 
         if result.returncode != 0:
-            return {"success": False, "rows": [], "count": 0, "error": result.stderr.strip()}
+            return {
+                "success": False,
+                "rows": [],
+                "count": 0,
+                "error": result.stderr.strip(),
+            }
 
         rows = []
         for line in result.stdout.strip().splitlines():
@@ -50,11 +52,11 @@ def execute_plan(plan: dict) -> dict:
     Returns a results dict compatible with graph_agent.populate_graph().
     """
     results = {
-        "target":        plan.get("target"),
-        "summary":       plan.get("summary"),
+        "target": plan.get("target"),
+        "summary": plan.get("summary"),
         "query_results": [],
-        "total_rows":    0,
-        "errors":        [],
+        "total_rows": 0,
+        "errors": [],
     }
 
     sources_hit = set()
@@ -64,7 +66,7 @@ def execute_plan(plan: dict) -> dict:
 
         result = run_query(query["sql"])
 
-        rows  = result.get("rows", [])
+        rows = result.get("rows", [])
         count = result.get("count", len(rows))
 
         # Debug: always show what came back
@@ -78,14 +80,14 @@ def execute_plan(plan: dict) -> dict:
                 print(f"    → 0 rows  |  (no matching data)")
 
         query_result = {
-            "id":      query["id"],
-            "name":    query["name"],
+            "id": query["id"],
+            "name": query["name"],
             "purpose": query.get("purpose", ""),
-            "sql":     query["sql"],
-            "rows":    rows,
-            "count":   count,
+            "sql": query["sql"],
+            "rows": rows,
+            "count": count,
             "success": result.get("success", True),
-            "error":   result.get("error"),
+            "error": result.get("error"),
         }
 
         results["query_results"].append(query_result)
@@ -94,37 +96,17 @@ def execute_plan(plan: dict) -> dict:
         if not query_result["success"] and query_result["error"]:
             results["errors"].append(f"[{query['id']}] {query_result['error']}")
 
-        # Track which tables were queried for coral_traces
+        SOURCE_TABLE_MAP = {
+            "sanctions": "sanctions.sanctions",
+            "emails": "emails.emails",
+            "slack_logs": "slack.slack_logs",
+        }
         sql_lower = query["sql"].lower()
-        for table in ["transactions", "sanctions", "emails", "slack_logs"]:
+        for table, full_name in SOURCE_TABLE_MAP.items():
             if table in sql_lower:
-                sources_hit.add(f"sentineldb.{table}")
-
-    _log_trace(plan, results, list(sources_hit))
+                sources_hit.add(full_name)
 
     return results
-
-
-def _log_trace(plan: dict, results: dict, sources_hit: list):
-    """Log this investigation run to the coral_traces table."""
-    try:
-        query_summary = (
-            f"Investigation: {plan.get('target')} — "
-            f"{len(plan.get('queries', []))} queries, "
-            f"{results['total_rows']} total rows"
-        )
-        with psycopg.connect(DATABASE_URL) as conn:
-            with conn.cursor() as cur:
-                cur.execute(
-                    """
-                    INSERT INTO coral_traces (query_text, sources_hit, execution_ms, cache_hit)
-                    VALUES (%s, %s, %s, %s)
-                    """,
-                    (query_summary, sources_hit, 0, False),
-                )
-            conn.commit()
-    except Exception as e:
-        print(f"  Warning: could not log trace: {e}")
 
 
 if __name__ == "__main__":
