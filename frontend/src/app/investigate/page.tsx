@@ -129,10 +129,10 @@ export default function InvestigatePage() {
 
   const investigate = async () => {
     if (!query.trim() || loading) return;
-    // Normalize: if user just types a company name, wrap it into a full request
+    // Normalize: if user just types a target name, wrap it into a full request
     const normalized = query.trim().toLowerCase().startsWith("investigate")
       ? query.trim()
-      : `Investigate company ${query.trim()}`;
+      : `Investigate ${query.trim()}`;
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
