@@ -567,13 +567,24 @@ export default function ReportPage() {
     try {
       const normalized = query.trim().toLowerCase().startsWith("investigate")
         ? query.trim()
-        : `Investigate company ${query.trim()}`;
-      const res = await fetch("http://localhost:8000/investigate", {
+        : `Investigate ${query.trim()}`;
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/investigate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request: normalized }),
       });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const err = await res.json() as { detail?: string };
+          detail = err?.detail ? ` — ${err.detail}` : "";
+        } catch {
+          // ignore JSON parse issues and keep status-only fallback
+        }
+        throw new Error(`HTTP ${res.status}${detail}`);
+      }
+
       const data = (await res.json()) as InvestigationResult;
       setResult(data);
       setTimestamp(new Date().toISOString());

@@ -493,12 +493,21 @@ def get_stats():
     }
 
 
+# Coral workspace name — set to "sentinelai" in production, default on local
+CORAL_WORKSPACE = os.getenv("CORAL_WORKSPACE", "")
+
+
 def _coral_query(sql: str) -> list[dict]:
     """Run a Coral SQL query and return rows as a list of dicts."""
     import subprocess
 
+    cmd = ["coral", "sql", "--format", "json"]
+    if CORAL_WORKSPACE:
+        cmd += ["--workspace", CORAL_WORKSPACE]
+    cmd.append(sql)
+
     result = subprocess.run(
-        ["coral", "sql", "--format", "json", sql],
+        cmd,
         capture_output=True,
         text=True,
         timeout=30,

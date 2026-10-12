@@ -23,3 +23,10 @@ data/processed/
 data/raw/emails.csv
 data/raw/transactions.csv
 coral/data/*.jsonl
+
+# Deployment
+.vercel
+*.tar.gz
+
+# Keep small jsonl files (slack only — others too large)
+!coral/data/slack_logs.jsonl

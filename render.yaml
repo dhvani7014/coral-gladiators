@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: sentinel-backend
+    runtime: docker
+    dockerfilePath: backend/Dockerfile
+    dockerContext: .
+    startCommand: uvicorn main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: GROQ_API_KEY
+        sync: false
+      - key: NEO4J_URI
+        sync: false
+      - key: NEO4J_USER
+        sync: false
+      - key: NEO4J_PASSWORD
+        sync: false
+      - key: SLACK_BOT_TOKEN
+        sync: false
+      - key: ADMIN_KEY
+        sync: false
+      - key: PYTHON_VERSION
+        value: 3.13.0

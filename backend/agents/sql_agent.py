@@ -1,16 +1,24 @@
 import json
+import os
 import subprocess
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
+CORAL_WORKSPACE = os.getenv("CORAL_WORKSPACE", "")
+
 
 def run_query(sql: str) -> dict:
     """Execute a single SQL query via Coral CLI directly."""
     try:
+        cmd = ["coral", "sql", "--format", "json"]
+        if CORAL_WORKSPACE:
+            cmd += ["--workspace", CORAL_WORKSPACE]
+        cmd.append(sql)
+
         result = subprocess.run(
-            ["coral", "sql", "--format", "json", sql],
+            cmd,
             capture_output=True,
             text=True,
             timeout=30,
