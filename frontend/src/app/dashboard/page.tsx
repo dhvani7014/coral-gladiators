@@ -146,7 +146,7 @@ export default function DashboardPage() {
 
   useEffect(() => {
     setNow(new Date().toLocaleString("en-US", { hour12: false }));
-    fetch("http://localhost:8000/stats")
+    fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/stats`)
       .then((r) => r.json())
       .then((d) => {
         setStats(d);

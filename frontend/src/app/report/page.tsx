@@ -568,7 +568,7 @@ export default function ReportPage() {
       const normalized = query.trim().toLowerCase().startsWith("investigate")
         ? query.trim()
         : `Investigate company ${query.trim()}`;
-      const res = await fetch("http://localhost:8000/investigate", {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/investigate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ request: normalized }),

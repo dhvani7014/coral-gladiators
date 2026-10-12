@@ -171,7 +171,7 @@ export default function TimelinePage() {
         setError(null);
         setEvents([]);
         try {
-            const res = await fetch(`http://localhost:8000/evidence/${encodeURIComponent(name)}`);
+            const res = await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/evidence/${encodeURIComponent(name)}`);
             if (!res.ok) throw new Error(`HTTP ${res.status} — backend unreachable`);
             const data = await res.json();
             setEvents(data.events || []);
@@ -183,7 +183,11 @@ export default function TimelinePage() {
     }
 
     useEffect(() => {
-        fetchTimeline(initialEntity);
+        const timer = window.setTimeout(() => {
+            void fetchTimeline(initialEntity);
+        }, 0);
+
+        return () => window.clearTimeout(timer);
     }, [initialEntity]);
 
     function handleSearch(e: React.FormEvent) {
@@ -465,7 +469,7 @@ export default function TimelinePage() {
                 <div className="bg-white/50 backdrop-blur-sm px-12 py-5 fixed bottom-0 left-0 right-0 border-t border-[#E0D8CF]">
                     <div className="flex justify-center w-full gap-8 flex-wrap">
                         {[
-                            { key: "Coral", val: "4 sources" }
+                            { key: "Coral", val: "4 sources" },
                             { key: "Neo4j", val: "port 7687" },
                             { key: "API", val: "port 8000" },
                             { key: "Model", val: "GROQ - llama-3.3-70b-versatile" },

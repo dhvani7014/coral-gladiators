@@ -132,7 +132,7 @@ export default function TracePage() {
     try {
       setError(null);
       const res = await fetch(
-        `http://localhost:8000/traces?limit=${LIMIT}&offset=${offset}`,
+        `${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/traces?limit=${LIMIT}&offset=${offset}`,
       );
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const data: TracesResponse = await res.json();
@@ -159,7 +159,7 @@ export default function TracePage() {
     if (!confirm("Delete all trace logs?")) return;
     setClearing(true);
     try {
-      await fetch("http://localhost:8000/traces", { method: "DELETE" });
+      await fetch(`${process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000"}/traces`, { method: "DELETE" });
       setTraces([]);
       setTotal(0);
       setOffset(0);

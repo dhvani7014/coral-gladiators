@@ -3,7 +3,7 @@
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 
-const BACKEND = "http://localhost:8000";
+const BACKEND = process.env.NEXT_PUBLIC_BACKEND_URL ?? "http://localhost:8000";
 
 interface SanctionItem {
   entity_name: string;
